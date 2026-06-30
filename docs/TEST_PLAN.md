@@ -99,8 +99,8 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 | Аналитика | `#analytics #analyticsBody #anHint`, карточки `.stat`, бары `.barrow` |
 | Команда | `.team[data-team-id]`, `[data-rename]`, `[data-delteam]`, `.metric .mv`, `.flagdot`, `.vac-strip`, `[data-addhere]`, `.diff-strip`, `.delta.up/.down` |
 | Роли в команде | `.role-group`, `.role-h .count`, `[data-addrole]` |
-| Карточка | `.chip[data-person-id][data-team-id]`, `.chip.contractor`, `.chip.vacancy`, `.grade`, `.name`, `.vac-name`, `.meta`, `.vac-chip.proj`, `.vac-chip.temp`, `.fte`, `[data-edit]`, классы `.dim .hit .moved-in` |
-| Модалка сотрудника | `#m_vacancy`, `#m_name_field`, `#m_status_field`, `#m_status button[data-st]`, `#m_grade`, `#m_role`, `#m_loc_field`, `#m_loc`, `#m_vac_field`, `#m_project`, `#m_expiry`, `#m_tags`, `#m_comment`, `#m_allocs [data-arow]`, `[data-ateam] [data-afte] [data-adel]`, `#m_addalloc`, `#m_allocsum`, `#m_save`, `#m_delete` |
+| Карточка | `.chip[data-person-id][data-team-id]`, `.chip.contractor`, `.chip.vacancy`, `.grade`, `.name`, `.vac-name`, `.meta`, `.pos-chip.proj`, `.pos-chip.temp`, `.fte`, `[data-edit]`, классы `.dim .hit .moved-in` |
+| Модалка сотрудника | `#m_vacancy`, `#m_name_field`, `#m_status_field`, `#m_status button[data-st]`, `#m_grade`, `#m_role`, `#m_loc_field`, `#m_loc`, `#m_pos_field`, `#m_project`, `#m_expiry`, `#m_tags`, `#m_comment`, `#m_allocs [data-arow]`, `[data-ateam] [data-afte] [data-adel]`, `#m_addalloc`, `#m_allocsum`, `#m_save`, `#m_delete` |
 | Справочники | `#s_roles` (роли: `[data-rolecolor] [data-roleedit] [data-roleup] [data-roledown] [data-rolerm]`), `#s_locations`/`#s_projects` (`[data-edit] [data-up] [data-down] [data-rm]`), `[data-add]`, `#s_newrole`, `#s_newloc`, `#s_newproj`, `#s_teams`, `[data-tname] [data-tcolor] [data-trm]`, `#s_addteam` |
 | Снимки | `#snap_name`, `#snap_save`, `.snap-item`, `.snap-item.baseline`, `[data-base] [data-restore] [data-export] [data-delsnap]` |
 | Общее | `.overlay`, `.modal`, `#toastRoot .toast` |
@@ -329,7 +329,7 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 ### TS-17. Ставки (вакансии), комментарии, проекты, аналитика
 - **TC-17.1 (P0)** Создание ставки: галка `#m_vacancy` прячет имя/статус/локацию, показывает
   проект/срок; сохранение даёт `isVacancy`, `name===""`, чип `.chip.vacancy` с «Вакансия».
-- **TC-17.2 (P1)** Чипсы проекта (`.vac-chip.proj`) и срока (`.vac-chip.temp`) на ставке, если заданы.
+- **TC-17.2 (P1)** Чипсы проекта (`.pos-chip.proj`) и срока (`.pos-chip.temp`) на ставке, если заданы.
 - **TC-17.3 (P1)** Комментарий: сохраняется, виден в `#m_comment`, **не** на доске.
 - **TC-17.4 (P1)** Аналитика: «Несбалансированные команды» (не «Команды-выбросы»), карточки
   «Открытые ставки» и «Топ тегов» присутствуют.
@@ -349,7 +349,7 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
   позиции** (`people[].project → ""`, чипы исчезают); undo возвращает проект справочнику и обеим
   позициям (V7-F1 / V8-F1).
 - **TC-17.13 (P1)** Проект **и срок** задаются занятой позиции: поля `#m_project`/`#m_expiry`
-  видны у обычного сотрудника, сохраняются оба, чипы `.vac-chip.proj` и `.vac-chip.temp` (со
+  видны у обычного сотрудника, сохраняются оба, чипы `.pos-chip.proj` и `.pos-chip.temp` (со
   значением даты) показаны на карточке (концепт, V8-F1).
 - **TC-17.14 (P2)** Импорт занятой позиции: неизвестный `project` → `""`, некалендарный `expiry`
   → `""` (чипы не показаны); валидные значения сохраняются (V8-F1, strict policy и для не-вакансий).

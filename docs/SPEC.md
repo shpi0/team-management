@@ -381,7 +381,7 @@ level = z > 1.6 (Z_BAD)  → "bad"  (красный)
   занятой сотрудником позиции.
 - `project` — **только из справочника** (неизвестный сбрасывается при нормализации, см. §5.1);
   `expiry` — календарно валидная дата или пусто. На доске у любой карточки чипсы: `▣ проект`
-  (`.vac-chip.proj`) и `⏳ до <дата>` (`.vac-chip.temp`) — только если заданы; иначе ничего.
+  (`.pos-chip.proj`) и `⏳ до <дата>` (`.pos-chip.temp`) — только если заданы; иначе ничего.
 
 ### 7.18. Аналитика по ставкам и тегам
 - Карточка «Открытые ставки»: всего + разбивка «обычных / проектных / временных» (категории
@@ -402,10 +402,10 @@ level = z > 1.6 (Z_BAD)  → "bad"  (красный)
 - **Доска:** `#board` → `.team[data-team-id]` → `.thead` (`.team-grip[data-teamdrag]`,
   `[data-rename] [data-delteam]`, `.metric`, `.vac-strip`) + `.members[data-drop]` (`.role-group` →
   `.role-h [data-addrole]` → `.chip[data-person-id][data-team-id][.contractor][.vacancy]` →
-  `.grade[.masked] .name|.vac-name .meta .vac-chips>.vac-chip(.proj/.temp) .tags>.tag-pill .fte
+  `.grade[.masked] .name|.vac-name .meta .pos-chips>.pos-chip(.proj/.temp) .tags>.tag-pill .fte
   [data-edit]`) + `.tfoot [data-addhere]`
 - **Модалка сотрудника:** `#m_vacancy #m_name_field>#m_name #m_status_field>#m_status`(`button[data-st]`)`
-  #m_grade #m_role #m_loc_field>#m_loc #m_vac_field>(#m_project #m_expiry) #m_tags #m_comment
+  #m_grade #m_role #m_loc_field>#m_loc #m_pos_field>(#m_project #m_expiry) #m_tags #m_comment
   #m_allocs`(`[data-arow] [data-ateam] [data-afte] [data-adel]`)` #m_addalloc #m_allocsum
   #m_save #m_delete`
 - **Справочники:** `#s_roles`(`[data-rolecolor] [data-roleedit] [data-roleup] [data-roledown]

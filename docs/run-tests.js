@@ -1297,7 +1297,7 @@ const FX_POS = () => ({
     await page.locator('#m_vacancy').check(); await page.waitForTimeout(40);
     eq(await page.locator('#m_name_field').evaluate(el => getComputedStyle(el).display), 'none', 'name field hidden');
     eq(await page.locator('#m_status_field').evaluate(el => getComputedStyle(el).display), 'none', 'status hidden');
-    assert(await page.locator('#m_vac_field').evaluate(el => getComputedStyle(el).display) !== 'none', 'project/expiry shown');
+    assert(await page.locator('#m_pos_field').evaluate(el => getComputedStyle(el).display) !== 'none', 'project/expiry shown');
     await page.locator('#m_role').selectOption('Backend');
     await page.locator('#m_grade').fill('10');
     await page.locator('#m_save').click(); await page.waitForTimeout(80);
@@ -1309,9 +1309,9 @@ const FX_POS = () => ({
   await T('TC-17.2', 'P1', 'Чипсы проекта и срока показываются на ставке', async () => {
     await bootFixture(page, FX_VAC()); // v1: project Proj1 + expiry
     const chip = page.locator('.chip.vacancy').first();
-    assert(await chip.locator('.vac-chip.proj').count() === 1, 'project chip shown');
-    assert(await chip.locator('.vac-chip.temp').count() === 1, 'expiry chip shown');
-    assert((await chip.locator('.vac-chip.proj').innerText()).includes('Proj1'), 'project name in chip');
+    assert(await chip.locator('.pos-chip.proj').count() === 1, 'project chip shown');
+    assert(await chip.locator('.pos-chip.temp').count() === 1, 'expiry chip shown');
+    assert((await chip.locator('.pos-chip.proj').innerText()).includes('Proj1'), 'project name in chip');
   });
   await T('TC-17.3', 'P1', 'Комментарий виден в модалке, но НЕ на доске (Feature 2)', async () => {
     await bootFixture(page, FX_VAC()); // r1 comment "note1"
@@ -1373,14 +1373,14 @@ const FX_POS = () => ({
   await T('TC-17.8', 'P2', 'Импорт: проект ставки вне справочника сбрасывается (V6-F2)', async () => {
     const fx = FX_VAC(); fx.state.people[1].project = ' Ghost '; // нет в projects ["Proj1"]
     await bootFixture(page, fx);
-    eq(await page.locator('.chip.vacancy .vac-chip.proj').count(), 0, 'unknown project chip not shown');
+    eq(await page.locator('.chip.vacancy .pos-chip.proj').count(), 0, 'unknown project chip not shown');
     await page.locator('#projName').fill('c'); await page.locator('#projName').dispatchEvent('change'); await page.waitForTimeout(60);
     eq((await lsGet(page)).state.people.find(p => p.isVacancy).project, '', 'unknown project reset to ""');
   });
   await T('TC-17.9', 'P2', 'Импорт: некалендарная дата срока отбрасывается (V6-F3)', async () => {
     const fx = FX_VAC(); fx.state.people[1].expiry = '2026-99-99';
     await bootFixture(page, fx);
-    eq(await page.locator('.chip.vacancy .vac-chip.temp').count(), 0, 'invalid expiry chip not shown');
+    eq(await page.locator('.chip.vacancy .pos-chip.temp').count(), 0, 'invalid expiry chip not shown');
     await page.locator('#projName').fill('c'); await page.locator('#projName').dispatchEvent('change'); await page.waitForTimeout(60);
     eq((await lsGet(page)).state.people.find(p => p.isVacancy).expiry, '', 'invalid expiry reset to ""');
     // не учитывается как временная в аналитике
@@ -1403,9 +1403,9 @@ const FX_POS = () => ({
   });
   await T('TC-17.12', 'P2', 'Delete проекта очищает его и у вакансии, и у занятой позиции + undo (V7-F1/V8-F1)', async () => {
     await bootFixture(page, FX_POS()); // projects ["Proj1"]; v1 (вакансия) и r1 (занятый) на Proj1
-    eq(await count('.chip.vacancy .vac-chip.proj'), 1, 'vacancy project chip initially');
+    eq(await count('.chip.vacancy .pos-chip.proj'), 1, 'vacancy project chip initially');
     const realChip = () => page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
-    eq(await realChip().locator('.vac-chip.proj').count(), 1, 'filled project chip initially');
+    eq(await realChip().locator('.pos-chip.proj').count(), 1, 'filled project chip initially');
     await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
     await page.locator('#s_projects [data-rm]').first().click(); await page.waitForTimeout(80);
     let st = (await lsGet(page)).state;
@@ -1413,23 +1413,23 @@ const FX_POS = () => ({
     eq(st.people.find(p => p.isVacancy).project, '', 'vacancy project cleared');
     eq(st.people.find(p => p.name === 'Real').project, '', 'filled project cleared');
     await page.keyboard.press('Escape'); await page.waitForTimeout(40);
-    eq(await count('.chip.vacancy .vac-chip.proj'), 0, 'vacancy chip gone');
-    eq(await realChip().locator('.vac-chip.proj').count(), 0, 'filled chip gone');
+    eq(await count('.chip.vacancy .pos-chip.proj'), 0, 'vacancy chip gone');
+    eq(await realChip().locator('.pos-chip.proj').count(), 0, 'filled chip gone');
     // undo возвращает проект в справочник и обеим позициям
     await page.locator('#undo').click(); await page.waitForTimeout(80);
     st = (await lsGet(page)).state;
     assert(st.projects.includes('Proj1'), 'undo restores project in dictionary');
     eq(st.people.find(p => p.isVacancy).project, 'Proj1', 'undo restores vacancy project');
     eq(st.people.find(p => p.name === 'Real').project, 'Proj1', 'undo restores filled project');
-    eq(await realChip().locator('.vac-chip.proj').count(), 1, 'filled chip restored');
+    eq(await realChip().locator('.pos-chip.proj').count(), 1, 'filled chip restored');
   });
   await T('TC-17.13', 'P1', 'Проект И срок задаются занятой позиции; чипсы показаны (концепт, V8-F1)', async () => {
     await bootFixture(page, FX_VAC()); // r1 — занятый сотрудник без проекта/срока; projects ["Proj1"]
     const chip = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
-    eq(await chip.locator('.vac-chip.proj').count(), 0, 'no project initially');
-    eq(await chip.locator('.vac-chip.temp').count(), 0, 'no expiry initially');
+    eq(await chip.locator('.pos-chip.proj').count(), 0, 'no project initially');
+    eq(await chip.locator('.pos-chip.temp').count(), 0, 'no expiry initially');
     await chip.locator('[data-edit]').click({ force: true }); await page.waitForTimeout(60);
-    assert(await page.locator('#m_vac_field').evaluate(el => getComputedStyle(el).display) !== 'none', 'project/expiry shown for filled');
+    assert(await page.locator('#m_pos_field').evaluate(el => getComputedStyle(el).display) !== 'none', 'project/expiry shown for filled');
     await page.locator('#m_project').selectOption('Proj1');
     await page.locator('#m_expiry').fill('2027-01-15');
     await page.locator('#m_save').click(); await page.waitForTimeout(80);
@@ -1438,19 +1438,19 @@ const FX_POS = () => ({
     eq(p.expiry, '2027-01-15', 'expiry saved on filled');
     assert(!p.isVacancy, 'still not a vacancy');
     const chip2 = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
-    eq(await chip2.locator('.vac-chip.proj').count(), 1, 'project chip shown');
-    eq(await chip2.locator('.vac-chip.temp').count(), 1, 'expiry chip shown');
-    assert((await chip2.locator('.vac-chip.temp').innerText()).includes('2027-01-15'), 'expiry value on chip');
+    eq(await chip2.locator('.pos-chip.proj').count(), 1, 'project chip shown');
+    eq(await chip2.locator('.pos-chip.temp').count(), 1, 'expiry chip shown');
+    assert((await chip2.locator('.pos-chip.temp').innerText()).includes('2027-01-15'), 'expiry value on chip');
   });
   await T('TC-17.14', 'P2', 'Импорт занятой позиции: strict project + валидный срок (V8-F1)', async () => {
     await bootFixture(page, FX_POS()); // r2 "Dirty": project " Ghost " (вне справочника), expiry "2026-99-99"
     const dirty = page.locator('.chip', { has: page.locator('.name', { hasText: 'Dirty' }) }).first();
-    eq(await dirty.locator('.vac-chip.proj').count(), 0, 'unknown project chip not shown (filled)');
-    eq(await dirty.locator('.vac-chip.temp').count(), 0, 'invalid expiry chip not shown (filled)');
+    eq(await dirty.locator('.pos-chip.proj').count(), 0, 'unknown project chip not shown (filled)');
+    eq(await dirty.locator('.pos-chip.temp').count(), 0, 'invalid expiry chip not shown (filled)');
     // валидная занятая позиция (Real) сохраняет проект и срок
     const real = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
-    eq(await real.locator('.vac-chip.proj').count(), 1, 'valid project chip shown (filled)');
-    eq(await real.locator('.vac-chip.temp').count(), 1, 'valid expiry chip shown (filled)');
+    eq(await real.locator('.pos-chip.proj').count(), 1, 'valid project chip shown (filled)');
+    eq(await real.locator('.pos-chip.temp').count(), 1, 'valid expiry chip shown (filled)');
     // зафиксировать persist и проверить нормализованный state
     await page.locator('#projName').fill('p'); await page.locator('#projName').dispatchEvent('change'); await page.waitForTimeout(60);
     const st = (await lsGet(page)).state;
