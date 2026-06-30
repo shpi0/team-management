@@ -123,6 +123,40 @@ const FX_BADSCHEMA = {
   }, snapshots: "garbage", baselineId: "nope"
 };
 
+// дубли id (V2-F1): две команды/два человека/два снимка с одинаковым безопасным id
+const FX_DUPIDS = {
+  state: {
+    meta: { name: "Dup", version: 1 }, roles: ["Backend"], locations: ["М"],
+    teams: [
+      { id: "tA", name: "A1", color: "#4f8cff" },
+      { id: "tA", name: "A2", color: "#6ee7b7" }            // дубликат team id
+    ],
+    people: [
+      { id: "px", name: "One", role: "Backend", grade: 9, isContractor: false, location: "М", allocations: [{ teamId: "tA", fte: 1 }] },
+      { id: "px", name: "Two", role: "Backend", grade: 10, isContractor: false, location: "М", allocations: [{ teamId: "tA", fte: 1 }] } // дубликат person id
+    ]
+  },
+  snapshots: [
+    { id: "sX", name: "S1", createdAt: "2026-01-01 00:00", doc: { meta: {}, roles: [], locations: [], teams: [], people: [] } },
+    { id: "sX", name: "S2", createdAt: "2026-01-02 00:00", doc: { meta: {}, roles: [], locations: [], teams: [], people: [] } } // дубликат snapshot id
+  ], baselineId: null
+};
+
+// round-trip полного пакета приложения (безопасные id): snapshot идентичен state, baseline выбран.
+// После импорта и включения compare никто не должен подсветиться как moved-in (V2-F2 — реальный кейс).
+const FX_ROUNDTRIP = () => {
+  const doc = {
+    meta: { name: "RT", version: 1 }, roles: ["Backend"], locations: ["М"],
+    teams: [{ id: "tA", name: "A", color: "#4f8cff" }, { id: "tB", name: "B", color: "#6ee7b7" }],
+    people: [
+      { id: "p1", name: "Stay1", role: "Backend", grade: 10, isContractor: false, location: "М", allocations: [{ teamId: "tA", fte: 1 }] },
+      { id: "p2", name: "Stay2", role: "Backend", grade: 9, isContractor: false, location: "М", allocations: [{ teamId: "tB", fte: 1 }] }
+    ]
+  };
+  const cp = () => JSON.parse(JSON.stringify(doc));
+  return { state: cp(), snapshots: [{ id: "s1", name: "Base", createdAt: "2026-01-01 00:00", doc: cp() }], baselineId: "s1", uidCounter: 2000 };
+};
+
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext();
@@ -261,6 +295,25 @@ const FX_BADSCHEMA = {
     assert(!names.includes('BadAlloc'), 'allocations not-array → person dropped');
     // baselineId на несуществующий снимок → null, без падений рендера
     eq((await lsGet(page)).baselineId, null, 'baseline reset');
+    eq(curErrors.length, 0, 'no pageerror');
+  });
+  await T('TC-2.9', 'P1', 'Импорт с дублями id: нормализация делает их уникальными (V2-F1)', async () => {
+    await bootFixture(page, FX());
+    const fs = require('fs'), os = require('os'), p = require('path');
+    const fp = p.join(os.tmpdir(), 'dupids.json');
+    fs.writeFileSync(fp, JSON.stringify(FX_DUPIDS));
+    await page.locator('#fileInput').setInputFiles(fp);
+    await page.waitForTimeout(200);
+    const d = await lsGet(page);
+    const teamIds = d.state.teams.map(t => t.id);
+    eq(new Set(teamIds).size, teamIds.length, 'team ids unique (' + teamIds.join(',') + ')');
+    eq(d.state.teams.length, 2, 'both teams kept');
+    const personIds = d.state.people.map(x => x.id);
+    eq(new Set(personIds).size, personIds.length, 'person ids unique');
+    const snapIds = d.snapshots.map(s => s.id);
+    eq(new Set(snapIds).size, snapIds.length, 'snapshot ids unique');
+    // на доске два разных data-team-id
+    eq(await count('.team'), 2, 'two team cards');
     eq(curErrors.length, 0, 'no pageerror');
   });
   await T('TC-2.7', 'P2', 'Имя кластера переживает reload', async () => {
@@ -855,6 +908,22 @@ const FX_BADSCHEMA = {
     await page.reload();
     await page.locator('#snapBtn').click(); await page.waitForTimeout(60);
     eq(await count('.snap-item'), 1, 'snapshot persisted');
+  });
+  await T('TC-12.8', 'P1', 'Round-trip импорт (safe ids): compare не даёт ложных moved-in (V2-F2 реальный кейс)', async () => {
+    await bootDemo(page);
+    const fs = require('fs'), os = require('os'), p = require('path');
+    const fp = p.join(os.tmpdir(), 'roundtrip.json');
+    fs.writeFileSync(fp, JSON.stringify(FX_ROUNDTRIP()));
+    await page.locator('#fileInput').setInputFiles(fp);
+    await page.waitForTimeout(200);
+    // baseline восстановлен из пакета, compareWrap виден
+    const disp = await page.locator('#compareWrap').evaluate(el => getComputedStyle(el).display);
+    assert(disp !== 'none', 'compareWrap visible after import');
+    await page.locator('#compareToggle').check(); await page.waitForTimeout(120);
+    // state идентичен baseline → никто не переезжал
+    eq(await count('.chip.moved-in'), 0, 'no spurious moved-in');
+    eq(await count('.chip'), 2, 'both chips present');
+    eq(curErrors.length, 0, 'no pageerror');
   });
 
   // ============ TS-13 print/png ============

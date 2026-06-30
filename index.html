@@ -306,22 +306,30 @@ function normalizeDoc(input){
   const roles     = Array.isArray(src.roles)     ? src.roles.filter(r=>typeof r==="string")     : [];
   const locations = Array.isArray(src.locations) ? src.locations.filter(r=>typeof r==="string") : [];
 
-  // команды: безопасный id (иначе регенерация + ремап аллокаций), валидный цвет
-  const idMap = new Map();
+  // команды: безопасный И уникальный id (иначе регенерация + ремап аллокаций), валидный цвет
+  const idMap = new Map();         // старый небезопасный id → новый (для ремапа аллокаций)
+  const seenTeam = new Set();
+  const freshId = (pfx, seen)=>{ let id; do{ id=uid(pfx); }while(seen.has(id)); return id; };
   const teams = (Array.isArray(src.teams)?src.teams:[]).map(t=>{
     t = t||{};
     let id = asStr(t.id);
-    if(!SAFE_ID.test(id)){ const nid=uid("t"); if(id) idMap.set(id,nid); id=nid; }
+    if(!SAFE_ID.test(id)){ const nid=freshId("t",seenTeam); if(id) idMap.set(id,nid); id=nid; }
+    else if(seenTeam.has(id)){ id = freshId("t",seenTeam); }   // дубликат безопасного id → новый
+    seenTeam.add(id);
     return { id, name: asStr(t.name,"Команда")||"Команда",
              color: HEX6.test(asStr(t.color)) ? t.color : "#4f8cff" };
   });
   const validTeam = new Set(teams.map(t=>t.id));
+  // дубликат «tA» → первый сохраняет id, аллокации на «tA» уходят к первому; ремап только небезопасных
   const remap = id => idMap.has(id) ? idMap.get(id) : id;
 
-  // люди: грейд клампится, у подрядчиков null; аллокации только на существующие команды с fte>0
+  // люди: уникальный id, грейд клампится, у подрядчиков null; аллокации только на существующие команды с fte>0
+  const seenPerson = new Set();
   const people = (Array.isArray(src.people)?src.people:[]).map(p=>{
     p = p||{};
-    let id = asStr(p.id); if(!SAFE_ID.test(id)) id = uid("p");
+    let id = asStr(p.id);
+    if(!SAFE_ID.test(id) || seenPerson.has(id)) id = freshId("p",seenPerson);
+    seenPerson.add(id);
     const isContractor = !!p.isContractor;
     let grade = null;
     if(!isContractor){ const n=parseInt(p.grade,10); grade = isNaN(n)?GRADE_MIN:Math.min(GRADE_MAX,Math.max(GRADE_MIN,n)); }
@@ -340,9 +348,12 @@ function normalizeDoc(input){
 
 function normalizeSnapshots(arr){
   if(!Array.isArray(arr)) return [];
+  const seen = new Set();
   return arr.map(s=>{
     s = s||{};
-    let id = asStr(s.id); if(!SAFE_ID.test(id)) id = uid("s");
+    let id = asStr(s.id);
+    if(!SAFE_ID.test(id) || seen.has(id)){ do{ id=uid("s"); }while(seen.has(id)); }
+    seen.add(id);
     return { id, name: asStr(s.name,"Снимок")||"Снимок", createdAt: asStr(s.createdAt),
              doc: normalizeDoc(s.doc) };
   });
