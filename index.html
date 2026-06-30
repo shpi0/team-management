@@ -1079,7 +1079,10 @@ function settingsModal(){
   $$("[data-roleup]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roleup; if(a>0){ [state.roles[a-1],state.roles[a]]=[state.roles[a],state.roles[a-1]]; commit(); rebind(); } });
   $$("[data-roledown]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roledown; if(a<state.roles.length-1){ [state.roles[a+1],state.roles[a]]=[state.roles[a],state.roles[a+1]]; commit(); rebind(); } });
   $$("[data-rolerm]").forEach(b=>b.onclick=()=>{ const i=+b.dataset.rolerm, r=state.roles[i]; state.roles.splice(i,1); if(state.roleColors) delete state.roleColors[r]; commit(); rebind(); });
-  $$("[data-rm]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.rm.split(":"); state[key].splice(+i,1); commit(); rebind(); });
+  $$("[data-rm]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.rm.split(":"); const removed=state[key][+i]; state[key].splice(+i,1);
+    // строгая модель проектов (V6-F2): удаление проекта снимает его со ставок, чтобы не было «несправочных» ссылок
+    if(key==="projects"){ for(const p of state.people){ if(p.project===removed) p.project=""; } }
+    commit(); rebind(); });
   $$("[data-up]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.up.split(":"); const a=+i; if(a>0){ [state[key][a-1],state[key][a]]=[state[key][a],state[key][a-1]]; commit(); rebind(); } });
   $$("[data-down]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.down.split(":"); const a=+i; if(a<state[key].length-1){ [state[key][a+1],state[key][a]]=[state[key][a],state[key][a+1]]; commit(); rebind(); } });
 

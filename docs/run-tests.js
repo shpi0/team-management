@@ -1378,6 +1378,23 @@ const FX_VAC = () => ({
     await page.locator('#searchInput').fill('ML-скоринг'); await page.waitForTimeout(80);
     assert(await count('.chip.hit') >= 1, 'search by project matches');
   });
+  await T('TC-17.12', 'P2', 'Delete проекта из справочника снимает его со ставок + undo (V7-F1)', async () => {
+    await bootFixture(page, FX_VAC()); // projects ["Proj1"], ставка project Proj1
+    eq(await count('.chip.vacancy .vac-chip.proj'), 1, 'project chip shown initially');
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    await page.locator('#s_projects [data-rm]').first().click(); await page.waitForTimeout(80);
+    let st = (await lsGet(page)).state;
+    eq(st.projects.length, 0, 'project removed from dictionary');
+    eq(st.people.find(p => p.isVacancy).project, '', 'vacancy project cleared');
+    await page.keyboard.press('Escape'); await page.waitForTimeout(40);
+    eq(await count('.chip.vacancy .vac-chip.proj'), 0, 'project chip gone');
+    // undo возвращает проект в справочник и ставке
+    await page.locator('#undo').click(); await page.waitForTimeout(80);
+    st = (await lsGet(page)).state;
+    assert(st.projects.includes('Proj1'), 'undo restores project in dictionary');
+    eq(st.people.find(p => p.isVacancy).project, 'Proj1', 'undo restores vacancy project');
+    eq(await count('.chip.vacancy .vac-chip.proj'), 1, 'project chip restored');
+  });
 
   await browser.close();
 
