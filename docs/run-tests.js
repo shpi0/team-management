@@ -1461,6 +1461,25 @@ const FX_POS = () => ({
     eq(r.project, 'Proj1', 'valid project kept (filled)');
     eq(r.expiry, '2026-12-31', 'valid expiry kept (filled)');
   });
+  await T('TC-17.15', 'P2', 'Чипсы проекта/срока: одной строкой и по контенту (не растянуты)', async () => {
+    await bootFixture(page, FX_POS()); // Real: project Proj1 + expiry → оба чипа
+    const real = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
+    const m = await real.locator('.pos-chips').evaluate(box => {
+      const proj = box.querySelector('.pos-chip.proj');
+      const temp = box.querySelector('.pos-chip.temp');
+      return {
+        sameLine: proj.offsetTop === temp.offsetTop,
+        projW: proj.getBoundingClientRect().width,
+        tempW: temp.getBoundingClientRect().width,
+        boxW: box.getBoundingClientRect().width
+      };
+    });
+    assert(m.sameLine, 'project and expiry chips on the same line');
+    // короткий проект ("Proj1") не должен занимать почти всю ширину строки чипсов
+    assert(m.projW < m.boxW * 0.6, `project chip is content-sized (projW ${Math.round(m.projW)} < 60% of ${Math.round(m.boxW)})`);
+    // оба чипа суммарно влезают в строку (nowrap, без переполнения контейнера)
+    assert(m.projW + m.tempW <= m.boxW + 2, 'both chips fit on one line');
+  });
 
   await browser.close();
 

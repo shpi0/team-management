@@ -129,10 +129,11 @@
   .chip.vacancy{border-style:dashed;border-color:#46557a;background:#131a28}
   .chip.vacancy .grade{opacity:.85}
   .vac-name{font-weight:700;color:var(--muted);font-style:italic;letter-spacing:.02em}
-  .pos-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
-  .pos-chip{font-size:10px;font-weight:600;line-height:1.3;border-radius:5px;padding:0 5px;white-space:nowrap}
+  .pos-chips{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin-top:3px;min-width:0;max-width:100%}
+  .pos-chip{font-size:10px;font-weight:600;line-height:1.3;border-radius:5px;padding:0 5px;white-space:nowrap;
+    flex:0 1 auto;min-width:0;width:fit-content;max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .pos-chip.proj{background:rgba(79,140,255,.16);color:#bcd0ff;border:1px solid rgba(79,140,255,.5)}
-  .pos-chip.temp{background:rgba(224,165,22,.16);color:#f4d98a;border:1px solid rgba(224,165,22,.5)}
+  .pos-chip.temp{background:rgba(224,165,22,.16);color:#f4d98a;border:1px solid rgba(224,165,22,.5);flex:0 0 auto}
   .chip.dim{opacity:.25;filter:grayscale(.6)}
   .chip.hit{box-shadow:0 0 0 2px var(--warn)}
   .chip.moved-in{box-shadow:0 0 0 2px var(--good)}
@@ -754,8 +755,8 @@ function renderChip(p, alloc, teamId, baseMap){
 
   // чипсы проекта/срока — атрибуты ставки, показываем и у вакансии, и у занятой сотрудником позиции
   const posChips = [
-    p.project ? `<span class="pos-chip proj" title="Проект ставки">▣ ${esc(p.project)}</span>` : "",
-    p.expiry  ? `<span class="pos-chip temp" title="Срок действия ставки">⏳ до ${esc(p.expiry)}</span>` : ""
+    p.project ? `<span class="pos-chip proj" title="Проект ставки: ${esc(p.project)}">▣ ${esc(p.project)}</span>` : "",
+    p.expiry  ? `<span class="pos-chip temp" title="Срок действия ставки: ${esc(p.expiry)}">⏳ до ${esc(p.expiry)}</span>` : ""
   ].join("");
   const posRow = posChips ? `<div class="pos-chips">${posChips}</div>` : "";
   let nameHtml, metaHtml;
