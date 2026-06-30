@@ -100,7 +100,7 @@ const FX_MIXGRADE = () => ({
     people: [
       { id: "s10", name: "S10", role: "Backend", grade: 10, isContractor: false, location: "Москва", allocations: [{ teamId: "tX", fte: 1 }] },
       { id: "c9", name: "Contr", role: "Backend", grade: null, isContractor: true, location: "Москва", allocations: [{ teamId: "tX", fte: 9 }] },
-      { id: "s6", name: "S6", role: "Backend", grade: 6, isContractor: false, location: "Москва", allocations: [{ teamId: "tY", fte: 1 }] }
+      { id: "s8", name: "S8y", role: "Backend", grade: 8, isContractor: false, location: "Москва", allocations: [{ teamId: "tY", fte: 1 }] }
     ]
   }, snapshots: [], baselineId: null, uidCounter: 1000
 });
@@ -603,9 +603,11 @@ const FX_BADSCHEMA = {
   });
   await T('TC-8.1b', 'P1', 'Сводный грейд весится по штатному grade-FTE, не по полному FTE', async () => {
     await bootFixture(page, FX_MIXGRADE());
-    // корректно: (10*1 + 6*1)/2 = 8.0; на старом баге было бы ~9.6
+    // X: штат г10 fte1 + подрядчик fte9; Y: штат г8 fte1. Грейды в диапазоне 7..12.
+    // Корректно (вес по grade-FTE штатных): (10*1 + 8*1)/(1+1) = 9.0.
+    // На старом баге (вес по полному FTE вкл. подрядчика): (10*10 + 8*1)/11 ≈ 9.8.
     const grade = await page.locator('#analyticsBody .stat').nth(0).locator('.v').innerText();
-    assert(grade.startsWith('8.0'), 'cluster grade must be 8.0 (got ' + grade + ')');
+    assert(grade.startsWith('9.0'), 'cluster grade must be 9.0 (got ' + grade + ')');
   });
   await T('TC-8.2', 'P1', 'Счётчик команд-выбросов', async () => {
     await bootFixture(page, FX_OUTLIER());
