@@ -310,9 +310,9 @@ function seed(){
     T("Антифрод","#e0a516"), T("Мобильный банк","#a855f7"),
   ];
   const projects = ["Платежи 2.0","Открытие счетов","ML-скоринг"];
-  const P=(name,role,grade,contractor,loc,allocs,tags,comment)=>({
+  const P=(name,role,grade,contractor,loc,allocs,tags,comment,project,expiry)=>({
     id:uid("p"),name,role,grade:contractor?null:grade,isContractor:contractor,isVacancy:false,location:loc,
-    tags:tags||[],comment:comment||"",project:"",expiry:"",
+    tags:tags||[],comment:comment||"",project:project||"",expiry:expiry||"",
     allocations:allocs.map(a=>({teamId:teams[a[0]].id,fte:a[1]}))
   });
   // ставка (вакансия): без имени, штатная; опционально проект и срок действия
@@ -329,7 +329,7 @@ function seed(){
     P("External: J. Doe","Backend",null,true,"Тбилиси",[[0,1]]),
     V("QA",9,[[0,1]],"","",["Automation"]),                    // обычная ставка
     P("Мария Зуева","SA",12,false,"Москва",[[1,0.5],[3,0.5]],["Архитектура","ML"]),
-    P("Павел Гром","Backend",10,false,"Москва",[[1,1]],["Java","Payments"]),
+    P("Павел Гром","Backend",10,false,"Москва",[[1,1]],["Java","Payments"],"","Открытие счетов","2026-09-30"),
     P("Ольга Тимина","BA",9,false,"Минск",[[1,1]]),
     P("External: A. Smith","Frontend",null,true,"Ереван",[[1,1]],["Vue"]),
     V("Backend",10,[[1,1]],"Открытие счетов","",["Java"]),     // ставка под проект
@@ -408,11 +408,12 @@ function normalizeDoc(input){
       if(raw==null || raw===""){ grade = isVacancy ? null : GRADE_MIN; }
       else { const n=parseInt(raw,10); grade = isNaN(n) ? (isVacancy?null:GRADE_MIN) : Math.min(GRADE_MAX,Math.max(GRADE_MIN,n)); }
     }
-    // срок: только календарно валидная дата ISO; проект: только из справочника (иначе обычная ставка)
+    // проект/срок — атрибуты ставки (позиции), применимы и к пустой ставке, и к занятой сотрудником.
+    // срок: только календарно валидная дата ISO; проект: только из справочника (иначе очищается).
     const rawExpiry = asStr(p.expiry).trim();
-    const expiry = isVacancy && validDateISO(rawExpiry) ? rawExpiry : "";
+    const expiry = validDateISO(rawExpiry) ? rawExpiry : "";
     const pr = asStr(p.project).trim();
-    const project = isVacancy && pr && projects.includes(pr) ? pr : "";
+    const project = pr && projects.includes(pr) ? pr : "";
     const allocations = (Array.isArray(p.allocations)?p.allocations:[])
       .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
       .filter(a=> a.fte>0 && validTeam.has(a.teamId));
@@ -751,15 +752,16 @@ function renderChip(p, alloc, teamId, baseMap){
   const tagsRow = (p.tags && p.tags.length)
     ? `<div class="tags">${p.tags.map(t=>`<span class="tag-pill">${esc(t)}</span>`).join("")}</div>` : "";
 
-  let nameHtml, metaHtml, vacRow="";
+  // чипсы проекта/срока — атрибуты ставки, показываем и у вакансии, и у занятой сотрудником позиции
+  const posChips = [
+    p.project ? `<span class="vac-chip proj" title="Проект ставки">▣ ${esc(p.project)}</span>` : "",
+    p.expiry  ? `<span class="vac-chip temp" title="Срок действия ставки">⏳ до ${esc(p.expiry)}</span>` : ""
+  ].join("");
+  const vacRow = posChips ? `<div class="vac-chips">${posChips}</div>` : "";
+  let nameHtml, metaHtml;
   if(p.isVacancy){
     nameHtml = `<span class="vac-name">Вакансия</span>`;
     metaHtml = esc(p.role||"—");
-    const chips = [
-      p.project ? `<span class="vac-chip proj" title="Проект">▣ ${esc(p.project)}</span>` : "",
-      p.expiry  ? `<span class="vac-chip temp" title="Срок действия ставки">⏳ до ${esc(p.expiry)}</span>` : ""
-    ].join("");
-    if(chips) vacRow = `<div class="vac-chips">${chips}</div>`;
   } else {
     nameHtml = `${esc(p.name)} ${contrBadge}`;
     metaHtml = `${esc(p.role||"—")} · ${esc(p.location||"—")}`;
@@ -888,7 +890,7 @@ function personModal(person, defaultTeamId, defaultRole){
     <h3><span class="icon">👤</span>${isNew?"Новый сотрудник / ставка":"Редактирование"}</h3>
     <div class="content">
       <label class="vac-check"><input type="checkbox" id="m_vacancy" ${p.isVacancy?'checked':''}>
-        Это <b>ставка</b> (вакансия) — штатная позиция без сотрудника (имя не указывается)</label>
+        <b>Пустая ставка</b> (вакансия) — позиция без сотрудника (имя не указывается)</label>
       <div class="field" id="m_name_field"><label>Имя / идентификатор</label>
         <input id="m_name" value="${esc(p.name)}" placeholder="Фамилия Имя"></div>
       <div class="row">
@@ -905,9 +907,9 @@ function personModal(person, defaultTeamId, defaultRole){
         <div class="field"><label>Роль</label><select id="m_role">${roleOpts}</select></div>
         <div class="field" id="m_loc_field"><label>Локация</label><select id="m_loc">${locOpts}</select></div>
       </div>
-      <div class="row" id="m_vac_field" style="display:none">
-        <div class="field"><label>Проект (тип ставки)</label><select id="m_project">${projOpts}</select></div>
-        <div class="field"><label>Срок действия (временная ставка)</label>
+      <div class="row" id="m_vac_field">
+        <div class="field"><label>Проект ставки (опционально)</label><select id="m_project">${projOpts}</select></div>
+        <div class="field"><label>Срок действия ставки (временная)</label>
           <input id="m_expiry" type="date" value="${esc(p.expiry||'')}"></div>
       </div>
       <div class="field"><label>Теги — уникальные навыки (через запятую; до ${MAX_TAGS} шт., по ${MAX_TAG_LEN} симв.)</label>
@@ -942,10 +944,10 @@ function personModal(person, defaultTeamId, defaultRole){
   // vacancy (ставка) toggle: прячем имя/статус/локацию, показываем проект+срок; ставка всегда штатная
   const applyVacancy=()=>{
     const v=$("#m_vacancy").checked;
+    // пустая ставка прячет имя/статус/локацию; проект и срок видны всегда (атрибуты ставки)
     $("#m_name_field").style.display = v?"none":"";
     $("#m_status_field").style.display = v?"none":"";
     $("#m_loc_field").style.display = v?"none":"";
-    $("#m_vac_field").style.display = v?"":"none";
     $("#m_grade_opt").textContent = v?" — опционально":"";
     if(v){ p.isContractor=false; $("#m_grade").disabled=false;
       $$("#m_status button").forEach(x=>x.classList.toggle("on", x.dataset.st==="staff")); }
@@ -974,13 +976,13 @@ function personModal(person, defaultTeamId, defaultRole){
     p.role=$("#m_role").value;
     p.tags=normTags($("#m_tags").value.split(","));
     p.comment=$("#m_comment").value;
+    // проект/срок — атрибуты ставки, сохраняются и у вакансии, и у занятой позиции
+    p.project=$("#m_project").value; p.expiry=$("#m_expiry").value||"";
     if(p.isVacancy){
       p.isContractor=false; p.name=""; p.location="";
-      p.project=$("#m_project").value; p.expiry=$("#m_expiry").value||"";
       const gv=$("#m_grade").value; p.grade = gv==="" ? null : clampGrade(gv);
     } else {
       p.name=$("#m_name").value.trim()||"Без имени"; p.location=$("#m_loc").value;
-      p.project=""; p.expiry="";
       p.grade = p.isContractor ? null : clampGrade($("#m_grade").value);
     }
     p.allocations = $$("#m_allocs [data-arow]").map(r=>({

@@ -1405,6 +1405,21 @@ const FX_VAC = () => ({
     eq(st.people.find(p => p.isVacancy).project, 'Proj1', 'undo restores vacancy project');
     eq(await count('.chip.vacancy .vac-chip.proj'), 1, 'project chip restored');
   });
+  await T('TC-17.13', 'P1', 'Проект/срок можно задать занятой (не пустой) ставке (концепт)', async () => {
+    await bootFixture(page, FX_VAC()); // r1 — занятый сотрудник; projects ["Proj1"]
+    const chip = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
+    eq(await chip.locator('.vac-chip.proj').count(), 0, 'filled person has no project initially');
+    await chip.locator('[data-edit]').click({ force: true }); await page.waitForTimeout(60);
+    // поля проекта/срока видны и у НЕ-вакансии
+    assert(await page.locator('#m_vac_field').evaluate(el => getComputedStyle(el).display) !== 'none', 'project/expiry shown for filled');
+    await page.locator('#m_project').selectOption('Proj1');
+    await page.locator('#m_save').click(); await page.waitForTimeout(80);
+    const p = (await lsGet(page)).state.people.find(x => x.name === 'Real');
+    eq(p.project, 'Proj1', 'project saved on filled person');
+    assert(!p.isVacancy, 'still not a vacancy');
+    const chip2 = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
+    eq(await chip2.locator('.vac-chip.proj').count(), 1, 'project chip shown on filled person');
+  });
 
   await browser.close();
 
