@@ -1326,6 +1326,58 @@ const FX_VAC = () => ({
     // totalHead в аналитике без ставок: 1 человек
     assert((await page.locator('#anHint').innerText()).includes('1 человек'), 'head excludes vacancy');
   });
+  await T('TC-17.7', 'P1', 'Удаление команды со ставками: confirm в обоих путях (V6-F1)', async () => {
+    // команда tA содержит только ставку (real убираем)
+    const mk = () => { const fx = FX_VAC(); fx.state.people = fx.state.people.filter(p => p.isVacancy); return fx; };
+    // путь доски: dismiss → остаётся
+    await bootFixture(page, mk());
+    dialogMode = 'dismiss';
+    await page.locator('.team[data-team-id="tA"] [data-delteam]').click(); await page.waitForTimeout(80);
+    eq(await page.locator('.team[data-team-id="tA"]').count(), 1, 'team kept on dismiss (confirm shown)');
+    assert((await lsGet(page)).state.people.some(p => p.isVacancy), 'vacancy kept on dismiss');
+    // путь доски: accept → удалена
+    dialogMode = 'accept';
+    await page.locator('.team[data-team-id="tA"] [data-delteam]').click(); await page.waitForTimeout(80);
+    eq(await page.locator('.team[data-team-id="tA"]').count(), 0, 'team removed on accept');
+    // путь settings ([data-trm]): dismiss → остаётся
+    await bootFixture(page, mk());
+    dialogMode = 'dismiss';
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    await page.locator('#s_teams [data-trm]').first().click(); await page.waitForTimeout(80);
+    assert((await lsGet(page)).state.teams.length === 1, 'settings delete confirm shown (kept on dismiss)');
+    dialogMode = 'accept';
+  });
+  await T('TC-17.8', 'P2', 'Импорт: проект ставки вне справочника сбрасывается (V6-F2)', async () => {
+    const fx = FX_VAC(); fx.state.people[1].project = ' Ghost '; // нет в projects ["Proj1"]
+    await bootFixture(page, fx);
+    eq(await page.locator('.chip.vacancy .vac-chip.proj').count(), 0, 'unknown project chip not shown');
+    await page.locator('#projName').fill('c'); await page.locator('#projName').dispatchEvent('change'); await page.waitForTimeout(60);
+    eq((await lsGet(page)).state.people.find(p => p.isVacancy).project, '', 'unknown project reset to ""');
+  });
+  await T('TC-17.9', 'P2', 'Импорт: некалендарная дата срока отбрасывается (V6-F3)', async () => {
+    const fx = FX_VAC(); fx.state.people[1].expiry = '2026-99-99';
+    await bootFixture(page, fx);
+    eq(await page.locator('.chip.vacancy .vac-chip.temp').count(), 0, 'invalid expiry chip not shown');
+    await page.locator('#projName').fill('c'); await page.locator('#projName').dispatchEvent('change'); await page.waitForTimeout(60);
+    eq((await lsGet(page)).state.people.find(p => p.isVacancy).expiry, '', 'invalid expiry reset to ""');
+    // не учитывается как временная в аналитике
+    assert((await page.locator('#analyticsBody').innerText()).includes('временных 0'), 'vacTemp excludes invalid date');
+  });
+  await T('TC-17.10', 'P2', 'Фильтр «Только ставки» и «Только штат» относительно ставок (G1)', async () => {
+    await bootDemo(page); // 3 ставки
+    await page.locator('#filterStatus').selectOption('vacancy'); await page.waitForTimeout(80);
+    const vacHit = await count('.chip.vacancy.hit'), nonVacHit = await count('.chip.hit:not(.vacancy)');
+    assert(vacHit >= 1 && nonVacHit === 0, 'only vacancies matched');
+    await page.locator('#filterStatus').selectOption('staff'); await page.waitForTimeout(80);
+    eq(await count('.chip.vacancy.hit'), 0, 'staff filter excludes vacancies');
+  });
+  await T('TC-17.11', 'P2', 'Поиск находит ставки по «вакансия» и по проекту/тегу (G2)', async () => {
+    await bootDemo(page);
+    await page.locator('#searchInput').fill('вакансия'); await page.waitForTimeout(80);
+    assert(await count('.chip.vacancy.hit') >= 1, 'search «вакансия» matches vacancies');
+    await page.locator('#searchInput').fill('ML-скоринг'); await page.waitForTimeout(80);
+    assert(await count('.chip.hit') >= 1, 'search by project matches');
+  });
 
   await browser.close();
 

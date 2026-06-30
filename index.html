@@ -230,13 +230,14 @@
   </div>
   <div class="subbar">
     <div class="search"><span class="icon" style="color:var(--muted)">⌕</span>
-      <input id="searchInput" placeholder="Поиск по имени…"></div>
+      <input id="searchInput" placeholder="Поиск: имя, роль, проект, тег…"></div>
     <select class="f" id="filterRole"><option value="">Все роли</option></select>
     <select class="f" id="filterLoc"><option value="">Все локации</option></select>
     <select class="f" id="filterStatus">
-      <option value="">Штат + подрядчики</option>
+      <option value="">Все</option>
       <option value="staff">Только штат</option>
       <option value="contractor">Только подрядчики</option>
+      <option value="vacancy">Только ставки</option>
     </select>
     <label class="chip-toggle"><input type="checkbox" id="filterMode"> скрывать несовпадающих</label>
     <span class="spacer"></span>
@@ -354,6 +355,12 @@ const HEX6 = /^#[0-9a-fA-F]{6}$/;
 const asStr = (v,def="")=> typeof v==="string" ? v : (v==null ? def : String(v));
 // уникальные непустые строки (trim до дедупа — как UI add/rename; дубли справочников запрещены)
 const uniqStrings = (arr)=> [...new Set((Array.isArray(arr)?arr:[]).filter(v=>typeof v==="string").map(v=>v.trim()).filter(Boolean))];
+// календарно валидная дата ISO (не только формат): «2026-99-99» → false
+function validDateISO(s){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0,10)===s;
+}
 
 function normalizeDoc(input){
   const src = (input && typeof input==="object") ? input : {};
@@ -399,8 +406,11 @@ function normalizeDoc(input){
       if(raw==null || raw===""){ grade = isVacancy ? null : GRADE_MIN; }
       else { const n=parseInt(raw,10); grade = isNaN(n) ? (isVacancy?null:GRADE_MIN) : Math.min(GRADE_MAX,Math.max(GRADE_MIN,n)); }
     }
-    const expiry = isVacancy && /^\d{4}-\d{2}-\d{2}$/.test(asStr(p.expiry).trim()) ? asStr(p.expiry).trim() : "";
-    const project = isVacancy ? asStr(p.project).trim() : "";
+    // срок: только календарно валидная дата ISO; проект: только из справочника (иначе обычная ставка)
+    const rawExpiry = asStr(p.expiry).trim();
+    const expiry = isVacancy && validDateISO(rawExpiry) ? rawExpiry : "";
+    const pr = asStr(p.project).trim();
+    const project = isVacancy && pr && projects.includes(pr) ? pr : "";
     const allocations = (Array.isArray(p.allocations)?p.allocations:[])
       .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
       .filter(a=> a.fte>0 && validTeam.has(a.teamId));
@@ -521,9 +531,15 @@ const flagColor = l => l==="bad"?"var(--bad)":l==="warn"?"var(--warn)":"var(--go
 function matchFilter(p){
   if(ui.fRole && p.role!==ui.fRole) return false;
   if(ui.fLoc && p.location!==ui.fLoc) return false;
-  if(ui.fStatus==="staff" && p.isContractor) return false;
+  if(ui.fStatus==="staff" && (p.isContractor || p.isVacancy)) return false; // «штат» — только реальные штатные
   if(ui.fStatus==="contractor" && !p.isContractor) return false;
-  if(ui.search){ if(!(p.name||"").toLowerCase().includes(ui.search.toLowerCase())) return false; }
+  if(ui.fStatus==="vacancy" && !p.isVacancy) return false;
+  if(ui.search){
+    const q=ui.search.toLowerCase();
+    // поиск по имени, роли, проекту, тегам и слову «вакансия» (комментарий намеренно не ищем — он скрыт с доски)
+    const hay=[p.name, p.role, p.project, p.isVacancy?"вакансия":"", ...(p.tags||[])].join(" ").toLowerCase();
+    if(!hay.includes(q)) return false;
+  }
   return true;
 }
 function anyFilterActive(){ return ui.search||ui.fRole||ui.fLoc||ui.fStatus; }
@@ -808,6 +824,21 @@ function reorderTeam(fromId, toId){
   commit();
 }
 
+// удаление команды с подтверждением, если есть участники ИЛИ открытые ставки (V6-F1)
+function deleteTeamById(id){
+  const m=teamMetrics(id);
+  if(m.head>0 || m.vacancies>0){
+    const parts=[];
+    if(m.head>0) parts.push(`участников: ${m.head}`);
+    if(m.vacancies>0) parts.push(`открытых ставок: ${m.vacancies} (${m.vacancyFte.toFixed(1)} FTE)`);
+    if(!confirm(`Удалить команду? ${parts.join(", ")}. Их аллокации в этой команде будут сняты.`)) return false;
+  }
+  state.teams=state.teams.filter(t=>t.id!==id);
+  for(const p of state.people) p.allocations=p.allocations.filter(a=>a.teamId!==id);
+  state.people=state.people.filter(p=>p.allocations.length>0); // осиротевших (вкл. ставки) убираем
+  return true;
+}
+
 function moveAllocation(personId, fromTeamId, toTeamId){
   const p=state.people.find(x=>x.id===personId); if(!p) return;
   const a=p.allocations.find(x=>x.teamId===fromTeamId); if(!a) return;
@@ -1056,12 +1087,7 @@ function settingsModal(){
   $$("[data-tname]").forEach(inp=>inp.onchange=()=>{ const t=state.teams.find(x=>x.id===inp.dataset.tname); t.name=inp.value.trim()||t.name; commit(); });
   $$("[data-tcolor]").forEach(inp=>inp.oninput=()=>{ const t=state.teams.find(x=>x.id===inp.dataset.tcolor); t.color=inp.value; commit(); });
   $$("[data-trm]").forEach(b=>b.onclick=()=>{
-    const id=b.dataset.trm; const m=teamMetrics(id);
-    if(m.head>0 && !confirm(`В команде есть участники (${m.head}). Удалить команду и снять их аллокации?`)) return;
-    state.teams=state.teams.filter(t=>t.id!==id);
-    for(const p of state.people) p.allocations=p.allocations.filter(a=>a.teamId!==id);
-    state.people=state.people.filter(p=>p.allocations.length>0); // осиротевших убираем
-    commit(); rebind();
+    if(deleteTeamById(b.dataset.trm)){ commit(); rebind(); }
   });
   $("#s_addteam").onclick=()=>{
     const palette=["#4f8cff","#6ee7b7","#e0a516","#a855f7","#e5484d","#22d3ee","#f472b6","#34d399"];
@@ -1216,11 +1242,8 @@ $("#board").addEventListener("click",e=>{
   if(addRole){ const t=e.target.closest(".team");
     quickAdd(t.dataset.teamId, addRole.dataset.addrole); return; }
   const delTeam=e.target.closest("[data-delteam]");
-  if(delTeam){ const t=e.target.closest(".team"); const m=teamMetrics(t.dataset.teamId);
-    if(m.head>0 && !confirm(`Удалить команду? Участников: ${m.head}, их аллокации в этой команде будут сняты.`)) return;
-    const id=t.dataset.teamId; state.teams=state.teams.filter(x=>x.id!==id);
-    for(const p of state.people) p.allocations=p.allocations.filter(a=>a.teamId!==id);
-    state.people=state.people.filter(p=>p.allocations.length>0); commit(); return; }
+  if(delTeam){ const t=e.target.closest(".team");
+    if(deleteTeamById(t.dataset.teamId)) commit(); return; }
 });
 $("#board").addEventListener("change",e=>{
   const rn=e.target.closest("[data-rename]");
