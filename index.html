@@ -71,7 +71,7 @@
   .barrow{display:flex;align-items:center;gap:8px;margin-top:6px}
   .barrow .lbl{width:64px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .barrow .track{flex:1;height:7px;background:#0e1626;border-radius:4px;overflow:hidden}
-  .barrow .fill{height:100%}
+  .barrow .fill{display:block;height:100%;min-width:2px;border-radius:4px}
 
   /* ---------- Board ---------- */
   main{padding:12px 16px 60px}
@@ -79,6 +79,10 @@
   .team{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
     display:flex;flex-direction:column;min-height:120px;box-shadow:var(--shadow);transition:.12s}
   .team.dragover{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
+  .team.team-dragging{opacity:.45}
+  .team-grip{cursor:grab;color:var(--muted);font-size:14px;line-height:1;padding:0 2px;user-select:none;flex:none}
+  .team-grip:hover{color:var(--text)}
+  .team-grip:active{cursor:grabbing}
   .team h2{font-size:15px;margin:0;display:flex;align-items:center;gap:8px;flex:1}
   .team h2 input{background:transparent;border:1px solid transparent;color:var(--text);font:inherit;
     font-weight:700;border-radius:5px;padding:2px 5px;width:100%}
@@ -113,6 +117,10 @@
   .chip .nm{flex:1;min-width:0}
   .chip .nm .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .chip .nm .meta{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip .grade.masked{font-size:13px;letter-spacing:1px}
+  .chip .tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
+  .tag-pill{font-size:10px;font-weight:600;line-height:1.3;background:#0e1626;border:1px solid var(--line);
+    border-radius:5px;padding:0 5px;color:#bcd0ff;white-space:nowrap}
   .chip .fte{font-size:10px;font-weight:700;background:#0e1626;border:1px solid var(--line);
     border-radius:5px;padding:1px 5px;color:var(--accent2)}
   .chip .edit{opacity:0;transition:.1s;color:var(--muted);background:none;border:0;padding:2px 4px}
@@ -195,6 +203,8 @@
     <span class="sep"></span>
     <button class="btn ghost" id="undo" title="Отменить (Ctrl+Z)"><span class="icon">↶</span></button>
     <button class="btn ghost" id="redo" title="Повторить (Ctrl+Y)"><span class="icon">↷</span></button>
+    <span class="sep"></span>
+    <button class="btn ghost" id="gradeEye" title="Скрыть/показать грейды"><span class="icon">👁</span></button>
     <span class="spacer"></span>
     <button class="btn" id="snapBtn"><span class="icon">⧉</span>Снимки</button>
     <button class="btn" id="settingsBtn"><span class="icon">⚙</span>Справочники</button>
@@ -248,11 +258,19 @@ const Z_WARN = 0.85, Z_BAD = 1.6;
 let state = null;          // {meta, roles, locations, teams, people}
 let snapshots = [];        // [{id,name,createdAt,doc}]
 let baselineId = null;
-let ui = { search:"", fRole:"", fLoc:"", fStatus:"", fHide:false, compare:false };
+let ui = { search:"", fRole:"", fLoc:"", fStatus:"", fHide:false, compare:false, hideGrades:false };
 let history = [], hpos = -1;   // undo/redo стек документов
 let uidCounter = 1;
 
 const uid = (p) => `${p}${Date.now().toString(36)}${(uidCounter++).toString(36)}`;
+// цвет квадрата грейда по роли: явный из справочника, иначе детерминированный из палитры по индексу роли
+const ROLE_PALETTE = ["#3b82f6","#10b981","#f59e0b","#a855f7","#ef4444","#06b6d4","#ec4899","#84cc16","#f97316","#14b8a6"];
+function roleColor(role){
+  const rc = state.roleColors||{};
+  if(/^#[0-9a-fA-F]{6}$/.test(rc[role]||"")) return rc[role];
+  const i = state.roles.indexOf(role);
+  return i>=0 ? ROLE_PALETTE[i%ROLE_PALETTE.length] : "var(--staff)";
+}
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const clone = (o)=>JSON.parse(JSON.stringify(o));
@@ -267,28 +285,31 @@ function seed(){
     T("Платёжный шлюз","#4f8cff"), T("Карты и счета","#6ee7b7"),
     T("Антифрод","#e0a516"), T("Мобильный банк","#a855f7"),
   ];
-  const P=(name,role,grade,contractor,loc,allocs)=>({
+  const P=(name,role,grade,contractor,loc,allocs,tags)=>({
     id:uid("p"),name,role,grade:contractor?null:grade,isContractor:contractor,location:loc,
+    tags:tags||[],
     allocations:allocs.map(a=>({teamId:teams[a[0]].id,fte:a[1]}))
   });
   const people = [
-    P("Алексей Орлов","Backend",11,false,"Москва",[[0,1]]),
-    P("Дмитрий Сухов","Backend",9,false,"Минск",[[0,0.5],[2,0.5]]),
-    P("Игорь Лапин","Frontend",8,false,"Ереван",[[0,1]]),
-    P("Сергей Котов","QA",8,false,"Санкт-Петербург",[[0,1]]),
+    P("Алексей Орлов","Backend",11,false,"Москва",[[0,1]],["Kafka","Tech Lead"]),
+    P("Дмитрий Сухов","Backend",9,false,"Минск",[[0,0.5],[2,0.5]],["Go"]),
+    P("Игорь Лапин","Frontend",8,false,"Ереван",[[0,1]],["React"]),
+    P("Сергей Котов","QA",8,false,"Санкт-Петербург",[[0,1]],["Automation"]),
     P("External: J. Doe","Backend",null,true,"Тбилиси",[[0,1]]),
-    P("Мария Зуева","SA",12,false,"Москва",[[1,0.5],[3,0.5]]),
-    P("Павел Гром","Backend",10,false,"Москва",[[1,1]]),
+    P("Мария Зуева","SA",12,false,"Москва",[[1,0.5],[3,0.5]],["Архитектура","ML"]),
+    P("Павел Гром","Backend",10,false,"Москва",[[1,1]],["Java","Payments"]),
     P("Ольга Тимина","BA",9,false,"Минск",[[1,1]]),
-    P("External: A. Smith","Frontend",null,true,"Ереван",[[1,1]]),
-    P("Никита Волк","Backend",12,false,"Москва",[[2,1]]),
-    P("Елена Рой","Data Engineer",11,false,"Москва",[[2,1]]),
+    P("External: A. Smith","Frontend",null,true,"Ереван",[[1,1]],["Vue"]),
+    P("Никита Волк","Backend",12,false,"Москва",[[2,1]],["Security"]),
+    P("Елена Рой","Data Engineer",11,false,"Москва",[[2,1]],["Spark","Airflow"]),
     P("External: K. Ivanov","AT",null,true,"Минск",[[2,1]]),
-    P("Роман Дуб","Frontend",10,false,"Санкт-Петербург",[[3,1]]),
+    P("Роман Дуб","Frontend",10,false,"Санкт-Петербург",[[3,1]],["React Native"]),
     P("Анна Лис","Backend",8,false,"Тбилиси",[[3,1]]),
     P("Виктор Сом","QA",7,false,"Ереван",[[3,0.5]]),
   ];
-  return { meta:{name:"Кластер продуктовой разработки",version:1}, roles, locations, teams, people };
+  const roleColors = { Backend:"#3b82f6", Frontend:"#10b981", SA:"#f59e0b", BA:"#a855f7",
+    QA:"#ef4444", AT:"#06b6d4", "Data Engineer":"#84cc16" };
+  return { meta:{name:"Кластер продуктовой разработки",version:1}, roles, roleColors, locations, teams, people };
 }
 
 /* ============================================================ *
@@ -305,6 +326,11 @@ function normalizeDoc(input){
   const src = (input && typeof input==="object") ? input : {};
   const roles     = Array.isArray(src.roles)     ? src.roles.filter(r=>typeof r==="string")     : [];
   const locations = Array.isArray(src.locations) ? src.locations.filter(r=>typeof r==="string") : [];
+  // цвета ролей: только валидные hex6
+  const roleColors = {};
+  if(src.roleColors && typeof src.roleColors==="object"){
+    for(const k in src.roleColors){ if(HEX6.test(asStr(src.roleColors[k]))) roleColors[k]=src.roleColors[k]; }
+  }
 
   // команды: безопасный И уникальный id (иначе регенерация + ремап аллокаций), валидный цвет
   const idMap = new Map();         // старый небезопасный id → новый (для ремапа аллокаций)
@@ -336,14 +362,17 @@ function normalizeDoc(input){
     const allocations = (Array.isArray(p.allocations)?p.allocations:[])
       .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
       .filter(a=> a.fte>0 && validTeam.has(a.teamId));
+    const tags = Array.isArray(p.tags)
+      ? [...new Set(p.tags.filter(t=>typeof t==="string" && t.trim()).map(t=>t.trim()))]
+      : [];
     return { id, name: asStr(p.name,"Без имени")||"Без имени", role: asStr(p.role),
-             grade, isContractor, location: asStr(p.location), allocations };
+             grade, isContractor, location: asStr(p.location), tags, allocations };
   }).filter(p=> p.allocations.length>0);   // люди без валидных аллокаций отбрасываются
 
   const meta = (src.meta && typeof src.meta==="object")
     ? { name: asStr(src.meta.name,"Кластер")||"Кластер", version:1 }
     : { name:"Кластер", version:1 };
-  return { meta, roles, locations, teams, people };
+  return { meta, roles, roleColors, locations, teams, people };
 }
 
 function normalizeSnapshots(arr){
@@ -364,7 +393,7 @@ function normalizeSnapshots(arr){
  * ============================================================ */
 function persist(){
   try{
-    localStorage.setItem(LS_KEY, JSON.stringify({state,snapshots,baselineId,ui:{},uidCounter}));
+    localStorage.setItem(LS_KEY, JSON.stringify({state,snapshots,baselineId,ui:{hideGrades:ui.hideGrades},uidCounter}));
   }catch(e){ /* квота/приватный режим — игнорируем, JSON-экспорт всё равно доступен */ }
 }
 function load(){
@@ -375,6 +404,7 @@ function load(){
       state = normalizeDoc(d.state);
       snapshots = normalizeSnapshots(d.snapshots);
       baselineId = snapshots.some(s=>s.id===d.baselineId) ? d.baselineId : null;
+      if(d.ui && typeof d.ui==="object") ui.hideGrades = !!d.ui.hideGrades;
       return; }
   }catch(e){}
   state = seed();
@@ -471,6 +501,9 @@ function render(){
   $("#searchInput").value = ui.search;
   $("#filterMode").checked = ui.fHide;
   $("#projName").value = state.meta.name||"";
+  // кнопка «глаз»: иконка + активное состояние
+  $("#gradeEye").innerHTML = `<span class="icon">${ui.hideGrades?"🙈":"👁"}</span>`;
+  $("#gradeEye").classList.toggle("primary", ui.hideGrades);
 
   // compare UI
   const base = snapshots.find(s=>s.id===baselineId);
@@ -552,6 +585,7 @@ function renderTeam(team, stats, baseMap, baseStats){
   el.innerHTML = `
     <div class="thead">
       <div class="top">
+        <span class="team-grip" data-teamdrag draggable="true" title="Перетащите, чтобы изменить порядок команд">⠿</span>
         <span class="team-color" style="background:${team.color||'#4f8cff'}"></span>
         <h2><input value="${esc(team.name)}" data-rename></h2>
         <button class="btn sm ghost" data-delteam title="Удалить команду">✕</button>
@@ -620,13 +654,17 @@ function renderChip(p, alloc, teamId, baseMap){
 
   const gradeBox = p.isContractor
     ? `<div class="grade" title="Подрядчик">ПД</div>`
-    : `<div class="grade" title="Грейд">${p.grade??"?"}</div>`;
+    : ui.hideGrades
+      ? `<div class="grade masked" style="background:${roleColor(p.role)}" title="Грейд скрыт">•••</div>`
+      : `<div class="grade" style="background:${roleColor(p.role)}" title="Грейд · ${esc(p.role||'—')}">${p.grade??"?"}</div>`;
   const fteBadge = alloc.fte<1 ? `<span class="fte" title="Доля занятости">${alloc.fte.toFixed(2).replace(/\.?0+$/,"")} FTE</span>`:"";
   const contrBadge = p.isContractor ? `<span class="badge contr">подряд</span>`:"";
+  const tagsRow = (p.tags && p.tags.length)
+    ? `<div class="tags">${p.tags.map(t=>`<span class="tag-pill">${esc(t)}</span>`).join("")}</div>` : "";
 
   c.innerHTML = `${gradeBox}
     <div class="nm"><div class="name">${esc(p.name)} ${contrBadge}</div>
-      <div class="meta">${esc(p.role||"—")} · ${esc(p.location||"—")}</div></div>
+      <div class="meta">${esc(p.role||"—")} · ${esc(p.location||"—")}</div>${tagsRow}</div>
     ${fteBadge}
     <button class="edit" data-edit title="Редактировать">✎</button>`;
   return c;
@@ -635,29 +673,55 @@ function renderChip(p, alloc, teamId, baseMap){
 /* ============================================================ *
  *  Drag & Drop — перенос аллокации целиком
  * ============================================================ */
-let dragData=null;
+let dragData=null;     // перенос участника (chip)
+let teamDrag=null;     // перенос команды (смена порядка)
 document.addEventListener("dragstart",e=>{
+  // приоритет — грип команды
+  const grip=e.target.closest?.("[data-teamdrag]");
+  if(grip){ const team=grip.closest(".team");
+    teamDrag={teamId:team.dataset.teamId}; team.classList.add("team-dragging");
+    e.dataTransfer.effectAllowed="move"; try{e.dataTransfer.setData("text/plain",team.dataset.teamId);}catch(_){}
+    return; }
   const chip=e.target.closest?.(".chip"); if(!chip) return;
   dragData={personId:chip.dataset.personId, fromTeamId:chip.dataset.teamId};
   chip.classList.add("dragging");
   e.dataTransfer.effectAllowed="move";
   try{e.dataTransfer.setData("text/plain",chip.dataset.personId);}catch(_){}
 });
-document.addEventListener("dragend",e=>{ e.target.closest?.(".chip")?.classList.remove("dragging"); dragData=null; });
+document.addEventListener("dragend",e=>{
+  e.target.closest?.(".chip")?.classList.remove("dragging");
+  $$(".team.team-dragging").forEach(t=>t.classList.remove("team-dragging"));
+  dragData=null; teamDrag=null;
+});
 document.addEventListener("dragover",e=>{
-  const team=e.target.closest?.(".team"); if(!team||!dragData) return;
+  const team=e.target.closest?.(".team"); if(!team||(!dragData&&!teamDrag)) return;
   e.preventDefault(); team.classList.add("dragover");
 });
 document.addEventListener("dragleave",e=>{
   const team=e.target.closest?.(".team"); if(team && !team.contains(e.relatedTarget)) team.classList.remove("dragover");
 });
 document.addEventListener("drop",e=>{
-  const team=e.target.closest?.(".team"); if(!team||!dragData) return;
+  const team=e.target.closest?.(".team"); if(!team) return;
   e.preventDefault(); team.classList.remove("dragover");
+  if(teamDrag){ reorderTeam(teamDrag.teamId, team.dataset.teamId); return; }
+  if(!dragData) return;
   const toTeamId=team.dataset.teamId;
   if(toTeamId===dragData.fromTeamId) return;
   moveAllocation(dragData.personId, dragData.fromTeamId, toTeamId);
 });
+
+// смена порядка команд: перетаскиваемая команда вставляется на позицию целевой
+function reorderTeam(fromId, toId){
+  if(fromId===toId) return;
+  const arr=state.teams;
+  const fromIdx=arr.findIndex(t=>t.id===fromId);
+  if(fromIdx<0) return;
+  const [moved]=arr.splice(fromIdx,1);
+  const toIdx=arr.findIndex(t=>t.id===toId);
+  if(toIdx<0){ arr.splice(fromIdx,0,moved); return; } // защита: вернуть на место
+  arr.splice(toIdx,0,moved);
+  commit();
+}
 
 function moveAllocation(personId, fromTeamId, toTeamId){
   const p=state.people.find(x=>x.id===personId); if(!p) return;
@@ -687,7 +751,7 @@ function personModal(person, defaultTeamId, defaultRole){
   const isNew=!person;
   const p = person ? clone(person) : {
     id:uid("p"), name:"", role:defaultRole||state.roles[0]||"", grade:9, isContractor:false,
-    location:state.locations[0]||"", allocations: defaultTeamId?[{teamId:defaultTeamId,fte:1}]:[]
+    location:state.locations[0]||"", tags:[], allocations: defaultTeamId?[{teamId:defaultTeamId,fte:1}]:[]
   };
   const roleOpts=state.roles.map(r=>`<option ${r===p.role?"selected":""}>${esc(r)}</option>`).join("");
   const locOpts=state.locations.map(r=>`<option ${r===p.location?"selected":""}>${esc(r)}</option>`).join("");
@@ -719,6 +783,8 @@ function personModal(person, defaultTeamId, defaultRole){
         <div class="field"><label>Роль</label><select id="m_role">${roleOpts}</select></div>
         <div class="field"><label>Локация</label><select id="m_loc">${locOpts}</select></div>
       </div>
+      <div class="field"><label>Теги — уникальные навыки (через запятую)</label>
+        <input id="m_tags" value="${esc((p.tags||[]).join(', '))}" placeholder="напр. Kafka, Tech Lead"></div>
       <div class="field"><label>Аллокации по командам (доли FTE)</label>
         <div class="listmgr" id="m_allocs">${allocRows(p.allocations)}</div>
         <button class="btn sm" id="m_addalloc" style="align-self:flex-start;margin-top:4px">＋ команда</button>
@@ -764,6 +830,7 @@ function personModal(person, defaultTeamId, defaultRole){
   $("#m_save").onclick=()=>{
     p.name=$("#m_name").value.trim()||"Без имени";
     p.role=$("#m_role").value; p.location=$("#m_loc").value;
+    p.tags=[...new Set($("#m_tags").value.split(",").map(s=>s.trim()).filter(Boolean))];
     p.grade = p.isContractor ? null : clampGrade($("#m_grade").value);
     p.allocations = $$("#m_allocs [data-arow]").map(r=>({
       teamId:$("[data-ateam]",r).value, fte:Math.max(0,parseFloat($("[data-afte]",r).value)||0)
@@ -790,8 +857,15 @@ function settingsModal(){
     <h3><span class="icon">⚙</span>Справочники</h3>
     <div class="content">
       <div class="row" style="align-items:flex-start">
-        <div class="field"><label>Роли</label>
-          <div class="listmgr" id="s_roles">${listMgr(state.roles,"roles")}</div>
+        <div class="field"><label>Роли и цвет квадрата грейда</label>
+          <div class="listmgr" id="s_roles">${state.roles.map((r,i)=>`
+            <div class="item">
+              <input type="color" value="${roleColor(r)}" data-rolecolor="${i}" style="width:30px;height:28px;padding:2px;flex:none" title="Цвет квадрата грейда для роли">
+              <input value="${esc(r)}" data-roleedit="${i}">
+              <button class="btn sm ghost" data-roleup="${i}">↑</button>
+              <button class="btn sm ghost" data-roledown="${i}">↓</button>
+              <button class="btn sm ghost" data-rolerm="${i}" style="color:var(--bad)">✕</button>
+            </div>`).join("")}</div>
           <div style="display:flex;gap:6px;margin-top:6px">
             <input class="f" id="s_newrole" placeholder="Новая роль" style="flex:1">
             <button class="btn sm" data-add="roles">Добавить</button></div></div>
@@ -810,7 +884,7 @@ function settingsModal(){
             <button class="btn sm ghost" data-trm="${t.id}" style="color:var(--bad)">✕</button></div>`).join("")}
         </div>
         <button class="btn sm" id="s_addteam" style="align-self:flex-start;margin-top:6px">＋ команда</button></div>
-      <span class="hint">Изменения справочников применяются сразу. Удаление роли/локации не трогает сотрудников — у них останется прежнее значение.</span>
+      <span class="hint">Изменения справочников применяются сразу. Цвет роли красит квадрат грейда на доске. Удаление/переименование роли/локации не трогает сотрудников — у них останется прежнее значение.</span>
     </div>
     <div class="foot"><button class="btn primary" onclick="closeModal()">Готово</button></div></div>`);
 
@@ -822,10 +896,24 @@ function settingsModal(){
     const v=inp.value.trim(); if(!v) return;
     if(!state[key].includes(v)) state[key].push(v); commit(); rebind();
   });
-  // edit inline roles/locations
+  // edit inline locations (роли — отдельными обработчиками ниже)
   $$("[data-edit]").forEach(inp=>inp.onchange=()=>{
     const [key,i]=inp.dataset.edit.split(":"); state[key][+i]=inp.value.trim()||state[key][+i]; commit();
   });
+  // roles: цвет, переименование (с переносом цвета), порядок, удаление
+  $$("[data-rolecolor]").forEach(inp=>inp.oninput=()=>{
+    const r=state.roles[+inp.dataset.rolecolor]; state.roleColors=state.roleColors||{};
+    state.roleColors[r]=inp.value; commit(); });
+  $$("[data-roleedit]").forEach(inp=>inp.onchange=()=>{
+    const i=+inp.dataset.roleedit, old=state.roles[i], nv=inp.value.trim()||old;
+    if(nv!==old){
+      if(state.roleColors && state.roleColors[old]!=null){ state.roleColors[nv]=state.roleColors[old]; delete state.roleColors[old]; }
+      state.roles[i]=nv;
+    }
+    commit(); rebind(); });
+  $$("[data-roleup]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roleup; if(a>0){ [state.roles[a-1],state.roles[a]]=[state.roles[a],state.roles[a-1]]; commit(); rebind(); } });
+  $$("[data-roledown]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roledown; if(a<state.roles.length-1){ [state.roles[a+1],state.roles[a]]=[state.roles[a],state.roles[a+1]]; commit(); rebind(); } });
+  $$("[data-rolerm]").forEach(b=>b.onclick=()=>{ const i=+b.dataset.rolerm, r=state.roles[i]; state.roles.splice(i,1); if(state.roleColors) delete state.roleColors[r]; commit(); rebind(); });
   $$("[data-rm]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.rm.split(":"); state[key].splice(+i,1); commit(); rebind(); });
   $$("[data-up]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.up.split(":"); const a=+i; if(a>0){ [state[key][a-1],state[key][a]]=[state[key][a],state[key][a-1]]; commit(); rebind(); } });
   $$("[data-down]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.down.split(":"); const a=+i; if(a<state[key].length-1){ [state[key][a+1],state[key][a]]=[state[key][a],state[key][a+1]]; commit(); rebind(); } });
@@ -967,6 +1055,7 @@ $("#addTeam").onclick=()=>{
   commit();
 };
 $("#undo").onclick=undo; $("#redo").onclick=redo;
+$("#gradeEye").onclick=()=>{ ui.hideGrades=!ui.hideGrades; persist(); render(); };
 $("#snapBtn").onclick=snapshotModal;
 $("#settingsBtn").onclick=settingsModal;
 $("#saveBtn").onclick=exportAll;

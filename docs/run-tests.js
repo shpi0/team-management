@@ -676,10 +676,18 @@ const FX_ROUNDTRIP = () => {
     }
     eq(outVal, nonGreen, 'outlier counter matches DOM flags');
   });
-  await T('TC-8.3', 'P2', 'Бар-чарт локаций', async () => {
+  await T('TC-8.3', 'P1', 'Бар-чарт локаций: полосы реально залиты (геометрия + цвет)', async () => {
     await bootFixture(page, FX()); // 2 locations
     const rows = await count('#analyticsBody .barrow');
     eq(rows, 2, '2 location bars');
+    // регрессия бага: .fill был inline <span> → height/width игнорировались, заливки нет.
+    const fill = page.locator('#analyticsBody .barrow .fill').first();
+    const box = await fill.evaluate(el => { const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el); return { w: r.width, h: r.height, bg: cs.backgroundColor, disp: cs.display }; });
+    assert(box.h >= 4, 'fill has real height (got ' + box.h + ')');
+    assert(box.w > 0, 'fill has real width (got ' + box.w + ')');
+    assert(box.disp === 'block', 'fill is display:block (got ' + box.disp + ')');
+    assert(box.bg && box.bg !== 'rgba(0, 0, 0, 0)' && box.bg !== 'transparent', 'fill has color (got ' + box.bg + ')');
   });
   await T('TC-8.4', 'P2', 'Сворачивание <details#analytics>', async () => {
     await bootDemo(page);
@@ -1012,6 +1020,74 @@ const FX_ROUNDTRIP = () => {
     await page.locator('#settingsBtn').click(); await page.waitForTimeout(40);
     await page.keyboard.press('Escape');
     eq(curErrors.length, 0, 'no pageerrors: ' + curErrors.join('|'));
+  });
+
+  // ============ TS-15 новые фичи ============
+  await T('TC-15.1', 'P1', 'Кнопка «глаз» скрывает/показывает грейды', async () => {
+    await bootFixture(page, FX());
+    const gradeChip = page.locator('.chip:not(.contractor)').first().locator('.grade');
+    const before = await gradeChip.innerText();
+    assert(/\d/.test(before), 'grade visible initially: ' + before);
+    await page.locator('#gradeEye').click(); await page.waitForTimeout(80);
+    const masked = await page.locator('.chip:not(.contractor)').first().locator('.grade').innerText();
+    assert(!/\d/.test(masked), 'grade masked after eye (got ' + masked + ')');
+    // переживает reload (персистентность ui.hideGrades)
+    await page.reload(); await page.waitForTimeout(80);
+    const after = await page.locator('.chip:not(.contractor)').first().locator('.grade').innerText();
+    assert(!/\d/.test(after), 'still masked after reload');
+    // обратно
+    await page.locator('#gradeEye').click(); await page.waitForTimeout(80);
+    assert(/\d/.test(await page.locator('.chip:not(.contractor)').first().locator('.grade').innerText()), 'grade visible again');
+  });
+  await T('TC-15.2', 'P1', 'Теги сохраняются и отображаются на карточке', async () => {
+    await bootDemo(page); // seed: «Алексей Орлов» имеет теги Kafka, Tech Lead
+    const chip = page.locator('.chip', { has: page.locator('.name', { hasText: 'Алексей Орлов' }) }).first();
+    const tags = await chip.locator('.tag-pill').allInnerTexts();
+    assert(tags.includes('Kafka'), 'tag Kafka shown: ' + tags.join(','));
+    // добавить новый тег через модалку
+    await chip.locator('[data-edit]').click({ force: true });
+    await page.locator('#m_tags').fill('Kafka, Tech Lead, Mentor');
+    await page.locator('#m_save').click(); await page.waitForTimeout(80);
+    const p = (await lsGet(page)).state.people.find(x => x.name === 'Алексей Орлов');
+    assert(p.tags.includes('Mentor'), 'tag persisted');
+    const chip2 = page.locator('.chip', { has: page.locator('.name', { hasText: 'Алексей Орлов' }) }).first();
+    assert((await chip2.locator('.tag-pill').allInnerTexts()).includes('Mentor'), 'new tag rendered');
+  });
+  await T('TC-15.3', 'P1', 'Перетаскивание команд меняет порядок на доске', async () => {
+    await bootFixture(page, FX()); // teams: tA, tB
+    eq(await page.locator('.team').first().getAttribute('data-team-id'), 'tA', 'tA first initially');
+    // тащим tB на tA → tB встаёт перед tA
+    await page.evaluate(() => {
+      const src = document.querySelector('.team[data-team-id="tB"] [data-teamdrag]');
+      const tgt = document.querySelector('.team[data-team-id="tA"]');
+      const dt = new DataTransfer();
+      const f = (el, ty) => el.dispatchEvent(new DragEvent(ty, { bubbles: true, cancelable: true, dataTransfer: dt }));
+      f(src, 'dragstart'); f(tgt, 'dragover'); f(tgt, 'drop'); f(src, 'dragend');
+    });
+    await page.waitForTimeout(80);
+    eq(await page.locator('.team').first().getAttribute('data-team-id'), 'tB', 'tB first after reorder');
+    eq((await lsGet(page)).state.teams[0].id, 'tB', 'order persisted in LS');
+  });
+  await T('TC-15.4', 'P1', 'Квадрат грейда окрашен по роли (разные роли — разные цвета)', async () => {
+    await bootFixture(page, FX()); // Backend (idx0) и QA (idx1) без явных roleColors → палитра
+    const be = await page.locator('.chip', { has: page.locator('.name', { hasText: 'S10' }) }).first().locator('.grade')
+      .evaluate(el => getComputedStyle(el).backgroundColor);
+    const qa = await page.locator('.chip', { has: page.locator('.name', { hasText: 'S8' }) }).first().locator('.grade')
+      .evaluate(el => getComputedStyle(el).backgroundColor);
+    assert(be && qa && be !== qa, 'role colors differ (Backend ' + be + ' vs QA ' + qa + ')');
+  });
+  await T('TC-15.5', 'P1', 'Цвет роли настраивается в справочнике и применяется к квадрату', async () => {
+    await bootFixture(page, FX());
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    // первый цвет-пикер роли (Backend) → задаём #ff0000
+    const picker = page.locator('#s_roles [data-rolecolor]').first();
+    await picker.evaluate(el => { el.value = '#ff0000'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.waitForTimeout(60);
+    await page.keyboard.press('Escape');
+    const be = await page.locator('.chip', { has: page.locator('.name', { hasText: 'S10' }) }).first().locator('.grade')
+      .evaluate(el => getComputedStyle(el).backgroundColor);
+    eq(be, 'rgb(255, 0, 0)', 'Backend grade square is red');
+    assert((await lsGet(page)).state.roleColors.Backend === '#ff0000', 'roleColors persisted');
   });
 
   await browser.close();
