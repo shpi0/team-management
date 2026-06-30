@@ -1,5 +1,5 @@
 /* Team Balancer — autonomous Playwright test runner.
- * Covers docs/TEST_PLAN.md (TS-1 .. TS-14). */
+ * Covers docs/TEST_PLAN.md (TS-1 .. TS-17). */
 const { chromium } = require('playwright');
 
 const URL = 'http://localhost:8000/index.html';
@@ -88,7 +88,7 @@ const FX_OUTLIER = () => ({
 });
 
 // смешанные команды: крупный подрядный FTE не должен искажать сводный средний грейд
-// корректно: weight по grade-FTE → (10*1 + 6*1)/2 = 8.0; ошибочно (по полному FTE) → ~9.6
+// корректно: weight по grade-FTE → (10*1 + 8*1)/(1+1) = 9.0; ошибочно (по полному FTE) → ~9.8
 const FX_MIXGRADE = () => ({
   state: {
     meta: { name: "Mix", version: 1 },
@@ -193,6 +193,19 @@ const FX_VAC = () => ({
       { id: "v1", name: "", role: "Backend", grade: 9, isContractor: false, isVacancy: true, location: "", tags: ["Go"], comment: "", project: "Proj1", expiry: "2026-12-31", allocations: [{ teamId: "tA", fte: 1 }] }
     ]
   }, snapshots: [], baselineId: null, uidCounter: 5000
+});
+
+// занятые позиции с проектом/сроком (концепт v2.1): валидная + «грязная» из импорта + вакансия на том же проекте
+const FX_POS = () => ({
+  state: {
+    meta: { name: "Pos", version: 1 }, roles: ["Backend"], roleColors: {}, locations: ["М"], projects: ["Proj1"],
+    teams: [{ id: "tA", name: "A", color: "#4f8cff" }],
+    people: [
+      { id: "r1", name: "Real", role: "Backend", grade: 10, isContractor: false, isVacancy: false, location: "М", tags: [], comment: "", project: "Proj1", expiry: "2026-12-31", allocations: [{ teamId: "tA", fte: 1 }] },
+      { id: "r2", name: "Dirty", role: "Backend", grade: 9, isContractor: false, isVacancy: false, location: "М", tags: [], comment: "", project: " Ghost ", expiry: "2026-99-99", allocations: [{ teamId: "tA", fte: 1 }] },
+      { id: "v1", name: "", role: "Backend", grade: 8, isContractor: false, isVacancy: true, location: "", tags: [], comment: "", project: "Proj1", expiry: "", allocations: [{ teamId: "tA", fte: 1 }] }
+    ]
+  }, snapshots: [], baselineId: null, uidCounter: 6000
 });
 
 (async () => {
@@ -1388,37 +1401,65 @@ const FX_VAC = () => ({
     await page.locator('#searchInput').fill('ML-скоринг'); await page.waitForTimeout(80);
     assert(await count('.chip.hit') >= 1, 'search by project matches');
   });
-  await T('TC-17.12', 'P2', 'Delete проекта из справочника снимает его со ставок + undo (V7-F1)', async () => {
-    await bootFixture(page, FX_VAC()); // projects ["Proj1"], ставка project Proj1
-    eq(await count('.chip.vacancy .vac-chip.proj'), 1, 'project chip shown initially');
+  await T('TC-17.12', 'P2', 'Delete проекта очищает его и у вакансии, и у занятой позиции + undo (V7-F1/V8-F1)', async () => {
+    await bootFixture(page, FX_POS()); // projects ["Proj1"]; v1 (вакансия) и r1 (занятый) на Proj1
+    eq(await count('.chip.vacancy .vac-chip.proj'), 1, 'vacancy project chip initially');
+    const realChip = () => page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
+    eq(await realChip().locator('.vac-chip.proj').count(), 1, 'filled project chip initially');
     await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
     await page.locator('#s_projects [data-rm]').first().click(); await page.waitForTimeout(80);
     let st = (await lsGet(page)).state;
     eq(st.projects.length, 0, 'project removed from dictionary');
     eq(st.people.find(p => p.isVacancy).project, '', 'vacancy project cleared');
+    eq(st.people.find(p => p.name === 'Real').project, '', 'filled project cleared');
     await page.keyboard.press('Escape'); await page.waitForTimeout(40);
-    eq(await count('.chip.vacancy .vac-chip.proj'), 0, 'project chip gone');
-    // undo возвращает проект в справочник и ставке
+    eq(await count('.chip.vacancy .vac-chip.proj'), 0, 'vacancy chip gone');
+    eq(await realChip().locator('.vac-chip.proj').count(), 0, 'filled chip gone');
+    // undo возвращает проект в справочник и обеим позициям
     await page.locator('#undo').click(); await page.waitForTimeout(80);
     st = (await lsGet(page)).state;
     assert(st.projects.includes('Proj1'), 'undo restores project in dictionary');
     eq(st.people.find(p => p.isVacancy).project, 'Proj1', 'undo restores vacancy project');
-    eq(await count('.chip.vacancy .vac-chip.proj'), 1, 'project chip restored');
+    eq(st.people.find(p => p.name === 'Real').project, 'Proj1', 'undo restores filled project');
+    eq(await realChip().locator('.vac-chip.proj').count(), 1, 'filled chip restored');
   });
-  await T('TC-17.13', 'P1', 'Проект/срок можно задать занятой (не пустой) ставке (концепт)', async () => {
-    await bootFixture(page, FX_VAC()); // r1 — занятый сотрудник; projects ["Proj1"]
+  await T('TC-17.13', 'P1', 'Проект И срок задаются занятой позиции; чипсы показаны (концепт, V8-F1)', async () => {
+    await bootFixture(page, FX_VAC()); // r1 — занятый сотрудник без проекта/срока; projects ["Proj1"]
     const chip = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
-    eq(await chip.locator('.vac-chip.proj').count(), 0, 'filled person has no project initially');
+    eq(await chip.locator('.vac-chip.proj').count(), 0, 'no project initially');
+    eq(await chip.locator('.vac-chip.temp').count(), 0, 'no expiry initially');
     await chip.locator('[data-edit]').click({ force: true }); await page.waitForTimeout(60);
-    // поля проекта/срока видны и у НЕ-вакансии
     assert(await page.locator('#m_vac_field').evaluate(el => getComputedStyle(el).display) !== 'none', 'project/expiry shown for filled');
     await page.locator('#m_project').selectOption('Proj1');
+    await page.locator('#m_expiry').fill('2027-01-15');
     await page.locator('#m_save').click(); await page.waitForTimeout(80);
     const p = (await lsGet(page)).state.people.find(x => x.name === 'Real');
-    eq(p.project, 'Proj1', 'project saved on filled person');
+    eq(p.project, 'Proj1', 'project saved on filled');
+    eq(p.expiry, '2027-01-15', 'expiry saved on filled');
     assert(!p.isVacancy, 'still not a vacancy');
     const chip2 = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
-    eq(await chip2.locator('.vac-chip.proj').count(), 1, 'project chip shown on filled person');
+    eq(await chip2.locator('.vac-chip.proj').count(), 1, 'project chip shown');
+    eq(await chip2.locator('.vac-chip.temp').count(), 1, 'expiry chip shown');
+    assert((await chip2.locator('.vac-chip.temp').innerText()).includes('2027-01-15'), 'expiry value on chip');
+  });
+  await T('TC-17.14', 'P2', 'Импорт занятой позиции: strict project + валидный срок (V8-F1)', async () => {
+    await bootFixture(page, FX_POS()); // r2 "Dirty": project " Ghost " (вне справочника), expiry "2026-99-99"
+    const dirty = page.locator('.chip', { has: page.locator('.name', { hasText: 'Dirty' }) }).first();
+    eq(await dirty.locator('.vac-chip.proj').count(), 0, 'unknown project chip not shown (filled)');
+    eq(await dirty.locator('.vac-chip.temp').count(), 0, 'invalid expiry chip not shown (filled)');
+    // валидная занятая позиция (Real) сохраняет проект и срок
+    const real = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
+    eq(await real.locator('.vac-chip.proj').count(), 1, 'valid project chip shown (filled)');
+    eq(await real.locator('.vac-chip.temp').count(), 1, 'valid expiry chip shown (filled)');
+    // зафиксировать persist и проверить нормализованный state
+    await page.locator('#projName').fill('p'); await page.locator('#projName').dispatchEvent('change'); await page.waitForTimeout(60);
+    const st = (await lsGet(page)).state;
+    const d = st.people.find(p => p.name === 'Dirty');
+    eq(d.project, '', 'unknown project reset (filled)');
+    eq(d.expiry, '', 'invalid expiry reset (filled)');
+    const r = st.people.find(p => p.name === 'Real');
+    eq(r.project, 'Proj1', 'valid project kept (filled)');
+    eq(r.expiry, '2026-12-31', 'valid expiry kept (filled)');
   });
 
   await browser.close();
