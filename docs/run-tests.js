@@ -232,7 +232,7 @@ const FX_VAC = () => ({
   });
   await T('TC-1.4', 'P1', 'Аналитика присутствует', async () => {
     await bootDemo(page);
-    eq(await count('#analyticsBody .stat'), 5, '5 stat cards');
+    eq(await count('#analyticsBody .stat'), 8, '8 stat cards (грейд, подрядчики, FTE, баланс, ставки, команд/людей, локации, теги)');
     const hint = await page.locator('#anHint').innerText();
     assert(/команд/.test(hint) && /человек/.test(hint), 'anHint text: ' + hint);
   });
@@ -1299,11 +1299,12 @@ const FX_VAC = () => ({
   });
   await T('TC-17.4', 'P1', 'Аналитика: формулировка выбросов + блоки ставок и тегов (Feature 3/5)', async () => {
     await bootDemo(page);
-    const body = await page.locator('#analyticsBody').innerText();
-    assert(body.includes('Несбалансированные команды'), 'reworded outliers label');
-    assert(!body.includes('Команды-выбросы'), 'old label gone');
-    assert(body.includes('Открытые ставки'), 'vacancy breakdown card');
-    assert(body.includes('Топ тегов'), 'tags analytics card');
+    // .stat .k имеет text-transform:uppercase → innerText возвращает верхний регистр; сравниваем без регистра
+    const body = (await page.locator('#analyticsBody').innerText()).toLowerCase();
+    assert(body.includes('несбалансированные команды'), 'reworded outliers label');
+    assert(!body.includes('команды-выбросы'), 'old label gone');
+    assert(body.includes('открытые ставки'), 'vacancy breakdown card');
+    assert(body.includes('топ тегов'), 'tags analytics card');
   });
   await T('TC-17.5', 'P1', 'Справочник проектов: добавление + миграция при rename (Feature 4)', async () => {
     await bootFixture(page, FX_VAC()); // projects ["Proj1"], vacancy uses Proj1
