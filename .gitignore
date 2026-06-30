@@ -1,0 +1,19 @@
+# Локальные настройки Claude Code (машинно-зависимые)
+.claude/settings.local.json
+
+# Зависимости тестов (ставятся отдельно, см. docs/TEST_REPORT.md)
+node_modules/
+
+# Артефакты прогонов / временное
+*.log
+playwright-report/
+test-results/
+
+# Экспорт данных приложения (содержит реальные ФИО — не коммитим)
+*.json
+!package.json
+!package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db

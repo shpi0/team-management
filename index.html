@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Balancer — балансировка команд кластера</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1d2638; --line:#2a3650;
+    --text:#e6ecf5; --muted:#8a97ad; --accent:#4f8cff; --accent2:#6ee7b7;
+    --good:#2fbf71; --warn:#e0a516; --bad:#e5484d;
+    --staff:#3b82f6; --contractor:#a855f7;
+    --shadow:0 6px 20px rgba(0,0,0,.35);
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:linear-gradient(180deg,#0d121d,#0f1420 200px);
+    color:var(--text);
+    font:14px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;cursor:pointer}
+  .btn{
+    background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:8px;padding:7px 12px;display:inline-flex;align-items:center;gap:6px;
+    transition:.12s;white-space:nowrap;
+  }
+  .btn:hover{border-color:var(--accent);background:#26324a}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.sm{padding:4px 8px;font-size:12px}
+  .icon{font-size:15px;line-height:1}
+
+  /* ---------- Top bar ---------- */
+  header{
+    position:sticky;top:0;z-index:30;background:rgba(15,20,32,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+  }
+  .bar{display:flex;align-items:center;gap:10px;padding:10px 16px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;margin-right:6px}
+  .brand .dot{width:11px;height:11px;border-radius:50%;background:var(--accent2);box-shadow:0 0 12px var(--accent2)}
+  .proj{background:transparent;border:1px solid transparent;color:var(--text);font:inherit;
+    font-weight:600;border-radius:6px;padding:4px 8px;min-width:160px}
+  .proj:hover,.proj:focus{border-color:var(--line);outline:none}
+  .spacer{flex:1}
+  .sep{width:1px;height:24px;background:var(--line);margin:0 2px}
+
+  /* ---------- Toolbar 2 (filters/analytics) ---------- */
+  .subbar{display:flex;align-items:center;gap:10px;padding:8px 16px;flex-wrap:wrap;border-top:1px solid var(--line)}
+  .search{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:4px 10px;min-width:200px}
+  .search input{background:transparent;border:0;color:var(--text);font:inherit;outline:none;width:100%}
+  select.f,input.f{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:6px 8px;font:inherit}
+  .chip-toggle{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;cursor:pointer;user-select:none}
+
+  /* ---------- Analytics ---------- */
+  .analytics{margin:0 16px 4px;border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--panel);overflow:hidden}
+  .analytics summary{list-style:none;cursor:pointer;padding:10px 14px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .analytics summary::-webkit-details-marker{display:none}
+  .analytics .body{padding:4px 14px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:22px;font-weight:700;margin-top:3px}
+  .stat .sub{color:var(--muted);font-size:12px;margin-top:2px}
+  .barrow{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .barrow .lbl{width:64px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .barrow .track{flex:1;height:7px;background:#0e1626;border-radius:4px;overflow:hidden}
+  .barrow .fill{height:100%}
+
+  /* ---------- Board ---------- */
+  main{padding:12px 16px 60px}
+  .board{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;align-items:start}
+  .team{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    display:flex;flex-direction:column;min-height:120px;box-shadow:var(--shadow);transition:.12s}
+  .team.dragover{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
+  .team h2{font-size:15px;margin:0;display:flex;align-items:center;gap:8px;flex:1}
+  .team h2 input{background:transparent;border:1px solid transparent;color:var(--text);font:inherit;
+    font-weight:700;border-radius:5px;padding:2px 5px;width:100%}
+  .team h2 input:hover,.team h2 input:focus{border-color:var(--line);outline:none}
+  .thead{padding:11px 12px 8px;border-bottom:1px solid var(--line)}
+  .thead .top{display:flex;align-items:center;gap:6px}
+  .team-color{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+  .metrics{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+  .metric{flex:1;min-width:78px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:6px 8px;position:relative;overflow:hidden}
+  .metric .ml{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+  .metric .mv{font-size:17px;font-weight:700;margin-top:1px;display:flex;align-items:center;gap:6px}
+  .metric .flagdot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .metric .accentbar{position:absolute;left:0;bottom:0;height:3px;width:100%}
+
+  .members{padding:8px 10px 12px;flex:1;display:flex;flex-direction:column;gap:2px;min-height:54px}
+  .role-group{margin-top:6px}
+  .role-group:first-child{margin-top:0}
+  .role-h{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.05em;padding:3px 2px}
+  .role-h .count{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:0 7px;font-size:11px}
+  .role-h .addrole{margin-left:auto;opacity:0;transition:.1s}
+  .role-group:hover .addrole{opacity:1}
+
+  .chip{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:9px;padding:6px 8px;cursor:grab;transition:.1s;position:relative}
+  .chip:hover{border-color:#3a496a;background:#222d44}
+  .chip.dragging{opacity:.4}
+  .chip .grade{flex-shrink:0;width:26px;height:26px;border-radius:7px;display:flex;align-items:center;
+    justify-content:center;font-weight:700;font-size:12px;background:var(--staff);color:#fff}
+  .chip.contractor .grade{background:var(--contractor)}
+  .chip .nm{flex:1;min-width:0}
+  .chip .nm .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip .nm .meta{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip .fte{font-size:10px;font-weight:700;background:#0e1626;border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px;color:var(--accent2)}
+  .chip .edit{opacity:0;transition:.1s;color:var(--muted);background:none;border:0;padding:2px 4px}
+  .chip:hover .edit{opacity:1}
+  .chip .edit:hover{color:var(--text)}
+  .chip.dim{opacity:.25;filter:grayscale(.6)}
+  .chip.hit{box-shadow:0 0 0 2px var(--warn)}
+  .chip.moved-in{box-shadow:0 0 0 2px var(--good)}
+  .chip.moved-out{border-style:dashed;border-color:var(--bad);opacity:.7}
+
+  .badge{font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px}
+  .badge.contr{background:rgba(168,85,247,.18);color:#d6b4ff;border:1px solid rgba(168,85,247,.5)}
+
+  .tfoot{padding:8px 10px;border-top:1px solid var(--line)}
+  .empty-team{color:var(--muted);font-size:12px;text-align:center;padding:14px 6px;border:1px dashed var(--line);border-radius:8px;margin:6px}
+
+  /* diff strip for compare */
+  .diff-strip{font-size:11px;color:var(--muted);padding:2px 12px 0}
+  .delta.up{color:var(--good)} .delta.down{color:var(--bad)}
+
+  /* ---------- Modal ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(5,8,14,.6);backdrop-filter:blur(3px);
+    display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:50;overflow:auto}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:100%;max-width:520px;
+    box-shadow:var(--shadow);animation:pop .12s ease-out}
+  .modal.wide{max-width:720px}
+  @keyframes pop{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+  .modal h3{margin:0;padding:16px 18px;border-bottom:1px solid var(--line);font-size:16px;display:flex;align-items:center;gap:8px}
+  .modal .content{padding:16px 18px;display:flex;flex-direction:column;gap:14px;max-height:64vh;overflow:auto}
+  .modal .foot{padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{color:var(--muted);font-size:12px;font-weight:600}
+  .field input,.field select{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:8px 10px;font:inherit}
+  .row{display:flex;gap:12px}.row>*{flex:1}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:var(--panel2);border:0;padding:8px 14px;color:var(--muted)}
+  .seg button.on{background:var(--accent);color:#fff}
+  .alloc-row{display:flex;gap:8px;align-items:center}
+  .alloc-row select{flex:1}
+  .alloc-row input{width:80px}
+  .listmgr{display:flex;flex-direction:column;gap:6px}
+  .listmgr .item{display:flex;gap:8px;align-items:center;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:6px 8px}
+  .listmgr .item input{flex:1;background:transparent;border:0;color:var(--text);font:inherit;outline:none}
+  .hint{color:var(--muted);font-size:12px}
+  .snap-item{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:9px;padding:9px 11px}
+  .snap-item.baseline{border-color:var(--accent)}
+  .snap-item .si-main{flex:1}
+  .snap-item .si-main .nm{font-weight:600}
+  .snap-item .si-main .dt{color:var(--muted);font-size:11px}
+  .tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--accent);color:#fff}
+
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;padding:10px 16px;box-shadow:var(--shadow);z-index:80;
+    animation:pop .12s}
+  kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+
+  /* ---------- Print ---------- */
+  @media print{
+    body{background:#fff;color:#111}
+    header,.subbar,.analytics summary .icon,.chip .edit,.role-h .addrole,.tfoot,.toast,.overlay{display:none !important}
+    .analytics{break-inside:avoid;border-color:#ccc}
+    .board{grid-template-columns:repeat(3,1fr)}
+    .team{box-shadow:none;border-color:#bbb;break-inside:avoid}
+    .panel,.team,.metric,.chip{background:#fff !important}
+    *{color:#111 !important}
+    .chip,.metric{border-color:#ddd}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand"><span class="dot"></span>Team&nbsp;Balancer</div>
+    <input class="proj" id="projName" placeholder="Название кластера" title="Название проекта/кластера">
+    <span class="sep"></span>
+    <button class="btn primary" id="addPerson"><span class="icon">＋</span>Сотрудник</button>
+    <button class="btn" id="addTeam"><span class="icon">▦</span>Команда</button>
+    <span class="sep"></span>
+    <button class="btn ghost" id="undo" title="Отменить (Ctrl+Z)"><span class="icon">↶</span></button>
+    <button class="btn ghost" id="redo" title="Повторить (Ctrl+Y)"><span class="icon">↷</span></button>
+    <span class="spacer"></span>
+    <button class="btn" id="snapBtn"><span class="icon">⧉</span>Снимки</button>
+    <button class="btn" id="settingsBtn"><span class="icon">⚙</span>Справочники</button>
+    <span class="sep"></span>
+    <button class="btn" id="saveBtn" title="Скачать JSON"><span class="icon">⬇</span>JSON</button>
+    <button class="btn" id="loadBtn" title="Загрузить JSON"><span class="icon">⬆</span></button>
+    <button class="btn" id="pngBtn" title="Экспорт PNG"><span class="icon">🖼</span></button>
+    <button class="btn" id="printBtn" title="Печать / PDF"><span class="icon">🖨</span></button>
+    <input type="file" id="fileInput" accept="application/json" hidden>
+  </div>
+  <div class="subbar">
+    <div class="search"><span class="icon" style="color:var(--muted)">⌕</span>
+      <input id="searchInput" placeholder="Поиск по имени…"></div>
+    <select class="f" id="filterRole"><option value="">Все роли</option></select>
+    <select class="f" id="filterLoc"><option value="">Все локации</option></select>
+    <select class="f" id="filterStatus">
+      <option value="">Штат + подрядчики</option>
+      <option value="staff">Только штат</option>
+      <option value="contractor">Только подрядчики</option>
+    </select>
+    <label class="chip-toggle"><input type="checkbox" id="filterMode"> скрывать несовпадающих</label>
+    <span class="spacer"></span>
+    <label class="chip-toggle" id="compareWrap" style="display:none">
+      <input type="checkbox" id="compareToggle"> сравнить с базой: <b id="baselineName" style="color:var(--text)"></b></label>
+  </div>
+</header>
+
+<details class="analytics" id="analytics" open>
+  <summary><span class="icon">📊</span>Сводная аналитика кластера <span class="hint" style="margin-left:auto" id="anHint"></span></summary>
+  <div class="body" id="analyticsBody"></div>
+</details>
+
+<main><div class="board" id="board"></div></main>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+"use strict";
+/* ============================================================ *
+ *  Team Balancer — однофайловое приложение, без зависимостей.
+ *  Хранение: localStorage + экспорт/импорт JSON.
+ * ============================================================ */
+
+const LS_KEY = "team-balancer-v1";
+const GRADE_MIN = 7, GRADE_MAX = 12;
+// Пороги выброса по модулю z-оценки (сравнение команд между собой)
+const Z_WARN = 0.85, Z_BAD = 1.6;
+
+/* ---------- state ---------- */
+let state = null;          // {meta, roles, locations, teams, people}
+let snapshots = [];        // [{id,name,createdAt,doc}]
+let baselineId = null;
+let ui = { search:"", fRole:"", fLoc:"", fStatus:"", fHide:false, compare:false };
+let history = [], hpos = -1;   // undo/redo стек документов
+let uidCounter = 1;
+
+const uid = (p) => `${p}${Date.now().toString(36)}${(uidCounter++).toString(36)}`;
+const $ = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+const clone = (o)=>JSON.parse(JSON.stringify(o));
+const esc = (s)=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---------- demo seed ---------- */
+function seed(){
+  const roles = ["Backend","Frontend","SA","BA","QA","AT","Data Engineer"];
+  const locations = ["Москва","Санкт-Петербург","Минск","Ереван","Тбилиси"];
+  const T = (name,color)=>({id:uid("t"),name,color});
+  const teams = [
+    T("Платёжный шлюз","#4f8cff"), T("Карты и счета","#6ee7b7"),
+    T("Антифрод","#e0a516"), T("Мобильный банк","#a855f7"),
+  ];
+  const P=(name,role,grade,contractor,loc,allocs)=>({
+    id:uid("p"),name,role,grade:contractor?null:grade,isContractor:contractor,location:loc,
+    allocations:allocs.map(a=>({teamId:teams[a[0]].id,fte:a[1]}))
+  });
+  const people = [
+    P("Алексей Орлов","Backend",11,false,"Москва",[[0,1]]),
+    P("Дмитрий Сухов","Backend",9,false,"Минск",[[0,0.5],[2,0.5]]),
+    P("Игорь Лапин","Frontend",8,false,"Ереван",[[0,1]]),
+    P("Сергей Котов","QA",8,false,"Санкт-Петербург",[[0,1]]),
+    P("External: J. Doe","Backend",null,true,"Тбилиси",[[0,1]]),
+    P("Мария Зуева","SA",12,false,"Москва",[[1,0.5],[3,0.5]]),
+    P("Павел Гром","Backend",10,false,"Москва",[[1,1]]),
+    P("Ольга Тимина","BA",9,false,"Минск",[[1,1]]),
+    P("External: A. Smith","Frontend",null,true,"Ереван",[[1,1]]),
+    P("Никита Волк","Backend",12,false,"Москва",[[2,1]]),
+    P("Елена Рой","Data Engineer",11,false,"Москва",[[2,1]]),
+    P("External: K. Ivanov","AT",null,true,"Минск",[[2,1]]),
+    P("Роман Дуб","Frontend",10,false,"Санкт-Петербург",[[3,1]]),
+    P("Анна Лис","Backend",8,false,"Тбилиси",[[3,1]]),
+    P("Виктор Сом","QA",7,false,"Ереван",[[3,0.5]]),
+  ];
+  return { meta:{name:"Кластер продуктовой разработки",version:1}, roles, locations, teams, people };
+}
+
+/* ============================================================ *
+ *  Persistence
+ * ============================================================ */
+function persist(){
+  try{
+    localStorage.setItem(LS_KEY, JSON.stringify({state,snapshots,baselineId,ui:{},uidCounter}));
+  }catch(e){ /* квота/приватный режим — игнорируем, JSON-экспорт всё равно доступен */ }
+}
+function load(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw){ const d=JSON.parse(raw);
+      state=d.state; snapshots=d.snapshots||[]; baselineId=d.baselineId||null;
+      uidCounter=d.uidCounter||1; return; }
+  }catch(e){}
+  state = seed();
+}
+
+/* ============================================================ *
+ *  History (undo/redo) — снимок документа state
+ * ============================================================ */
+function pushHistory(){
+  history = history.slice(0,hpos+1);
+  history.push(clone(state));
+  if(history.length>60) history.shift();
+  hpos = history.length-1;
+}
+function commit(){ pushHistory(); persist(); render(); }
+function undo(){ if(hpos>0){ hpos--; state=clone(history[hpos]); persist(); render(); toast("Отменено"); } }
+function redo(){ if(hpos<history.length-1){ hpos++; state=clone(history[hpos]); persist(); render(); toast("Повторено"); } }
+
+/* ============================================================ *
+ *  Metrics & balance
+ * ============================================================ */
+function teamMetrics(teamId, doc=state){
+  let fte=0, head=0, gradeW=0, gradeFte=0, contrFte=0;
+  const locs={};
+  for(const p of doc.people){
+    for(const a of p.allocations){
+      if(a.teamId!==teamId) continue;
+      fte+=a.fte; head++;
+      if(p.isContractor) contrFte+=a.fte;
+      else if(p.grade!=null){ gradeW+=p.grade*a.fte; gradeFte+=a.fte; }
+      locs[p.location||"—"]=(locs[p.location||"—"]||0)+a.fte;
+    }
+  }
+  return {
+    fte, head,
+    avgGrade: gradeFte>0 ? gradeW/gradeFte : null,
+    contrShare: fte>0 ? contrFte/fte : 0,
+    locs
+  };
+}
+// статистика по кластеру для сравнения команд
+function clusterStats(doc=state){
+  const per = doc.teams.map(t=>({t, m:teamMetrics(t.id,doc)}));
+  const grades = per.filter(x=>x.m.avgGrade!=null).map(x=>x.m.avgGrade);
+  const shares = per.map(x=>x.m.contrShare);
+  const ftes = per.map(x=>x.m.fte);
+  const mean=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
+  const std=a=>{ if(a.length<2) return 0; const m=mean(a);
+    return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length); };
+  return {
+    per,
+    grade:{mean:mean(grades),std:std(grades)},
+    share:{mean:mean(shares),std:std(shares)},
+    fte:{mean:mean(ftes),std:std(ftes)},
+    totalFte: ftes.reduce((s,v)=>s+v,0),
+    totalHead: doc.people.length,
+    contractors: doc.people.filter(p=>p.isContractor).length,
+  };
+}
+function zFlag(val, ref){
+  if(val==null || ref.std===0) return {z:0, level:"good"};
+  const z=Math.abs((val-ref.mean)/ref.std);
+  return {z, level: z>Z_BAD?"bad": z>Z_WARN?"warn":"good"};
+}
+const flagColor = l => l==="bad"?"var(--bad)":l==="warn"?"var(--warn)":"var(--good)";
+
+/* ============================================================ *
+ *  Rendering
+ * ============================================================ */
+function matchFilter(p){
+  if(ui.fRole && p.role!==ui.fRole) return false;
+  if(ui.fLoc && p.location!==ui.fLoc) return false;
+  if(ui.fStatus==="staff" && p.isContractor) return false;
+  if(ui.fStatus==="contractor" && !p.isContractor) return false;
+  if(ui.search){ if(!(p.name||"").toLowerCase().includes(ui.search.toLowerCase())) return false; }
+  return true;
+}
+function anyFilterActive(){ return ui.search||ui.fRole||ui.fLoc||ui.fStatus; }
+
+// карта перемещений относительно baseline: personId -> Set(teamId) в базе
+function baselineAlloc(){
+  const snap = snapshots.find(s=>s.id===baselineId);
+  if(!snap) return null;
+  const map=new Map();
+  for(const p of snap.doc.people) map.set(p.id, new Set(p.allocations.map(a=>a.teamId)));
+  return map;
+}
+
+function render(){
+  // справочники в фильтры
+  fillSelect($("#filterRole"), state.roles, ui.fRole, "Все роли");
+  fillSelect($("#filterLoc"), state.locations, ui.fLoc, "Все локации");
+  $("#filterStatus").value = ui.fStatus;
+  $("#searchInput").value = ui.search;
+  $("#filterMode").checked = ui.fHide;
+  $("#projName").value = state.meta.name||"";
+
+  // compare UI
+  const base = snapshots.find(s=>s.id===baselineId);
+  $("#compareWrap").style.display = base ? "inline-flex":"none";
+  if(base){ $("#baselineName").textContent = base.name; $("#compareToggle").checked = ui.compare; }
+  const baseMap = (ui.compare && base) ? baselineAlloc() : null;
+  const baseStatsByTeam = (ui.compare && base) ? Object.fromEntries(
+    base.doc.teams.map(t=>[t.id, teamMetrics(t.id, base.doc)])) : null;
+
+  $("#undo").disabled = hpos<=0;
+  $("#redo").disabled = hpos>=history.length-1;
+
+  const stats = clusterStats();
+  renderAnalytics(stats);
+
+  const board = $("#board"); board.innerHTML="";
+  for(const team of state.teams){
+    board.appendChild(renderTeam(team, stats, baseMap, baseStatsByTeam));
+  }
+}
+
+function fillSelect(sel, items, val, allLabel){
+  const cur = val;
+  sel.innerHTML = `<option value="">${allLabel}</option>` +
+    items.map(r=>`<option ${r===cur?"selected":""}>${esc(r)}</option>`).join("");
+  sel.value = cur||"";
+}
+
+function renderAnalytics(stats){
+  const avgAll = (()=>{ let w=0,f=0; for(const x of stats.per){ if(x.m.avgGrade!=null){w+=x.m.avgGrade*x.m.fte;f+=x.m.fte;} } return f?w/f:null; })();
+  const contrPct = stats.totalFte? Math.round(stats.per.reduce((s,x)=>s+x.m.contrShare*x.m.fte,0)/stats.totalFte*100):0;
+  // локации по кластеру
+  const locAgg={};
+  for(const p of state.people){ for(const a of p.allocations){ const l=p.location||"—"; locAgg[l]=(locAgg[l]||0)+a.fte; } }
+  const locTop = Object.entries(locAgg).sort((a,b)=>b[1]-a[1]);
+  const totFte = Object.values(locAgg).reduce((s,v)=>s+v,0)||1;
+  const palette=["#4f8cff","#6ee7b7","#e0a516","#a855f7","#e5484d","#22d3ee","#f472b6"];
+
+  $("#anHint").textContent = `${state.teams.length} команд · ${stats.totalHead} человек`;
+  $("#analyticsBody").innerHTML = `
+    <div class="stat"><div class="k">Средний грейд</div>
+      <div class="v">${avgAll!=null?avgAll.toFixed(1):"—"}</div>
+      <div class="sub">взвеш. по FTE, штат</div></div>
+    <div class="stat"><div class="k">Доля подрядчиков</div>
+      <div class="v">${contrPct}%</div>
+      <div class="sub">${stats.contractors} из ${stats.totalHead} чел.</div></div>
+    <div class="stat"><div class="k">Суммарный FTE</div>
+      <div class="v">${stats.totalFte.toFixed(1)}</div>
+      <div class="sub">средн. ${(stats.totalFte/Math.max(1,state.teams.length)).toFixed(1)} на команду</div></div>
+    <div class="stat"><div class="k">Команды-выбросы</div>
+      <div class="v">${stats.per.filter(x=>zFlag(x.m.avgGrade,stats.grade).level!=="good"||zFlag(x.m.contrShare,stats.share).level!=="good").length}</div>
+      <div class="sub">по грейду / подрядчикам</div></div>
+    <div class="stat" style="grid-column:span 2"><div class="k">Распределение по локациям</div>
+      ${locTop.map((l,i)=>`<div class="barrow"><span class="lbl" title="${esc(l[0])}">${esc(l[0])}</span>
+        <span class="track"><span class="fill" style="width:${(l[1]/totFte*100).toFixed(0)}%;background:${palette[i%palette.length]}"></span></span>
+        <span class="hint">${l[1].toFixed(1)}</span></div>`).join("")}
+    </div>`;
+}
+
+function renderTeam(team, stats, baseMap, baseStats){
+  const m = teamMetrics(team.id);
+  const gf = zFlag(m.avgGrade, stats.grade);
+  const sf = zFlag(m.contrShare, stats.share);
+
+  const el = document.createElement("div");
+  el.className="team"; el.dataset.teamId=team.id;
+
+  // --- diff strip ---
+  let diff="";
+  if(baseStats && baseStats[team.id]){
+    const bm=baseStats[team.id];
+    const dG = (m.avgGrade!=null&&bm.avgGrade!=null)? m.avgGrade-bm.avgGrade : null;
+    const dF = m.fte-bm.fte;
+    const fmt=(v,inv)=>{ if(v==null) return ""; const cls=(inv? v<0:v>0)?"up":(v===0?"":"down");
+      const sign=v>0?"+":""; return `<span class="delta ${v===0?"":cls}">${sign}${v.toFixed(1)}</span>`; };
+    diff = `<div class="diff-strip">vs база: грейд ${dG!=null?fmt(dG):"—"} · FTE ${fmt(dF)}</div>`;
+  }
+
+  el.innerHTML = `
+    <div class="thead">
+      <div class="top">
+        <span class="team-color" style="background:${team.color||'#4f8cff'}"></span>
+        <h2><input value="${esc(team.name)}" data-rename></h2>
+        <button class="btn sm ghost" data-delteam title="Удалить команду">✕</button>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="ml">Средн. грейд</div>
+          <div class="mv">${m.avgGrade!=null?m.avgGrade.toFixed(1):"—"}
+            <span class="flagdot" style="background:${flagColor(gf.level)}" title="отклонение от кластера"></span></div>
+          <div class="accentbar" style="background:${flagColor(gf.level)}"></div></div>
+        <div class="metric"><div class="ml">Подрядчики</div>
+          <div class="mv">${Math.round(m.contrShare*100)}%
+            <span class="flagdot" style="background:${flagColor(sf.level)}"></span></div>
+          <div class="accentbar" style="background:${flagColor(sf.level)}"></div></div>
+        <div class="metric"><div class="ml">FTE / чел.</div>
+          <div class="mv">${m.fte.toFixed(1)}<span class="hint" style="font-size:12px">/${m.head}</span></div></div>
+      </div>
+      ${diff}
+    </div>
+    <div class="members" data-drop></div>
+    <div class="tfoot"><button class="btn sm ghost" data-addhere><span class="icon">＋</span>Добавить в команду</button></div>
+  `;
+
+  // --- members grouped by role ---
+  const box = $(".members", el);
+  const here = [];
+  for(const p of state.people)
+    for(const a of p.allocations)
+      if(a.teamId===team.id) here.push({p,a});
+
+  if(here.length===0){
+    box.innerHTML = `<div class="empty-team">Перетащите сюда участников<br>или нажмите «Добавить в команду»</div>`;
+  } else {
+    // порядок ролей как в справочнике, затем прочие
+    const order = new Map(state.roles.map((r,i)=>[r,i]));
+    const groups = {};
+    for(const x of here){ const r=x.p.role||"(без роли)"; (groups[r]=groups[r]||[]).push(x); }
+    const roleKeys = Object.keys(groups).sort((a,b)=>(order.has(a)?order.get(a):99)-(order.has(b)?order.get(b):99));
+    for(const r of roleKeys){
+      const g=document.createElement("div"); g.className="role-group";
+      const gFte=groups[r].reduce((s,x)=>s+x.a.fte,0);
+      g.innerHTML=`<div class="role-h">${esc(r)}<span class="count">${groups[r].length} · ${gFte.toFixed(1)} FTE</span>
+        <button class="btn sm ghost addrole" data-addrole="${esc(r)}" title="Добавить ${esc(r)}">＋</button></div>`;
+      for(const x of groups[r]) g.appendChild(renderChip(x.p,x.a,team.id,baseMap));
+      box.appendChild(g);
+    }
+  }
+  return el;
+}
+
+function renderChip(p, alloc, teamId, baseMap){
+  const c=document.createElement("div");
+  c.className="chip"+(p.isContractor?" contractor":"");
+  c.draggable=true;
+  c.dataset.personId=p.id; c.dataset.teamId=teamId;
+
+  // filter dim/hit
+  if(anyFilterActive()){
+    if(matchFilter(p)){ if(!ui.fHide) c.classList.add("hit"); }
+    else { c.classList.add("dim"); if(ui.fHide) c.style.display="none"; }
+  }
+  // compare highlight
+  if(baseMap){
+    const was = baseMap.get(p.id);
+    if(!was || !was.has(teamId)) c.classList.add("moved-in");
+  }
+
+  const gradeBox = p.isContractor
+    ? `<div class="grade" title="Подрядчик">ПД</div>`
+    : `<div class="grade" title="Грейд">${p.grade??"?"}</div>`;
+  const fteBadge = alloc.fte<1 ? `<span class="fte" title="Доля занятости">${alloc.fte.toFixed(2).replace(/\.?0+$/,"")} FTE</span>`:"";
+  const contrBadge = p.isContractor ? `<span class="badge contr">подряд</span>`:"";
+
+  c.innerHTML = `${gradeBox}
+    <div class="nm"><div class="name">${esc(p.name)} ${contrBadge}</div>
+      <div class="meta">${esc(p.role||"—")} · ${esc(p.location||"—")}</div></div>
+    ${fteBadge}
+    <button class="edit" data-edit title="Редактировать">✎</button>`;
+  return c;
+}
+
+/* ============================================================ *
+ *  Drag & Drop — перенос аллокации целиком
+ * ============================================================ */
+let dragData=null;
+document.addEventListener("dragstart",e=>{
+  const chip=e.target.closest?.(".chip"); if(!chip) return;
+  dragData={personId:chip.dataset.personId, fromTeamId:chip.dataset.teamId};
+  chip.classList.add("dragging");
+  e.dataTransfer.effectAllowed="move";
+  try{e.dataTransfer.setData("text/plain",chip.dataset.personId);}catch(_){}
+});
+document.addEventListener("dragend",e=>{ e.target.closest?.(".chip")?.classList.remove("dragging"); dragData=null; });
+document.addEventListener("dragover",e=>{
+  const team=e.target.closest?.(".team"); if(!team||!dragData) return;
+  e.preventDefault(); team.classList.add("dragover");
+});
+document.addEventListener("dragleave",e=>{
+  const team=e.target.closest?.(".team"); if(team && !team.contains(e.relatedTarget)) team.classList.remove("dragover");
+});
+document.addEventListener("drop",e=>{
+  const team=e.target.closest?.(".team"); if(!team||!dragData) return;
+  e.preventDefault(); team.classList.remove("dragover");
+  const toTeamId=team.dataset.teamId;
+  if(toTeamId===dragData.fromTeamId) return;
+  moveAllocation(dragData.personId, dragData.fromTeamId, toTeamId);
+});
+
+function moveAllocation(personId, fromTeamId, toTeamId){
+  const p=state.people.find(x=>x.id===personId); if(!p) return;
+  const a=p.allocations.find(x=>x.teamId===fromTeamId); if(!a) return;
+  const existing=p.allocations.find(x=>x.teamId===toTeamId);
+  if(existing){ existing.fte=Math.round((existing.fte+a.fte)*100)/100;
+    p.allocations=p.allocations.filter(x=>x!==a); }
+  else { a.teamId=toTeamId; }
+  commit();
+}
+
+/* ============================================================ *
+ *  Modals
+ * ============================================================ */
+function openModal(html){
+  const root=$("#modalRoot");
+  root.innerHTML=`<div class="overlay">${html}</div>`;
+  const ov=$(".overlay",root);
+  ov.addEventListener("mousedown",e=>{ if(e.target===ov) closeModal(); });
+  return root;
+}
+function closeModal(){ $("#modalRoot").innerHTML=""; }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
+
+/* ----- person editor ----- */
+function personModal(person, defaultTeamId){
+  const isNew=!person;
+  const p = person ? clone(person) : {
+    id:uid("p"), name:"", role:state.roles[0]||"", grade:9, isContractor:false,
+    location:state.locations[0]||"", allocations: defaultTeamId?[{teamId:defaultTeamId,fte:1}]:[]
+  };
+  const roleOpts=state.roles.map(r=>`<option ${r===p.role?"selected":""}>${esc(r)}</option>`).join("");
+  const locOpts=state.locations.map(r=>`<option ${r===p.location?"selected":""}>${esc(r)}</option>`).join("");
+  const teamOpt=(sel)=>state.teams.map(t=>`<option value="${t.id}" ${t.id===sel?"selected":""}>${esc(t.name)}</option>`).join("");
+
+  const allocRows = (allocs)=>allocs.map((a,i)=>`
+    <div class="alloc-row" data-arow>
+      <select data-ateam>${teamOpt(a.teamId)}</select>
+      <input type="number" data-afte min="0" max="1" step="0.1" value="${a.fte}">
+      <button class="btn sm ghost" data-adel title="Убрать">✕</button>
+    </div>`).join("");
+
+  openModal(`<div class="modal">
+    <h3><span class="icon">👤</span>${isNew?"Новый сотрудник":"Редактирование"}</h3>
+    <div class="content">
+      <div class="field"><label>Имя / идентификатор</label>
+        <input id="m_name" value="${esc(p.name)}" placeholder="Фамилия Имя"></div>
+      <div class="row">
+        <div class="field"><label>Статус</label>
+          <div class="seg" id="m_status">
+            <button data-st="staff" class="${p.isContractor?'':'on'}">Штат</button>
+            <button data-st="contractor" class="${p.isContractor?'on':''}">Подрядчик</button>
+          </div></div>
+        <div class="field"><label>Грейд</label>
+          <input id="m_grade" type="number" min="${GRADE_MIN}" max="${GRADE_MAX}" value="${p.grade??''}"
+            ${p.isContractor?'disabled':''}></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Роль</label><select id="m_role">${roleOpts}</select></div>
+        <div class="field"><label>Локация</label><select id="m_loc">${locOpts}</select></div>
+      </div>
+      <div class="field"><label>Аллокации по командам (доли FTE)</label>
+        <div class="listmgr" id="m_allocs">${allocRows(p.allocations)}</div>
+        <button class="btn sm" id="m_addalloc" style="align-self:flex-start;margin-top:4px">＋ команда</button>
+        <span class="hint" id="m_allocsum"></span>
+      </div>
+    </div>
+    <div class="foot">
+      ${isNew?"":`<button class="btn ghost" id="m_delete" style="margin-right:auto;color:var(--bad)">Удалить</button>`}
+      <button class="btn ghost" onclick="closeModal()">Отмена</button>
+      <button class="btn primary" id="m_save">Сохранить</button>
+    </div></div>`);
+
+  const upSum=()=>{ const sum=$$("#m_allocs [data-afte]").reduce((s,i)=>s+(parseFloat(i.value)||0),0);
+    $("#m_allocsum").textContent=`Суммарный FTE: ${sum.toFixed(2)}`; };
+  upSum();
+
+  // status toggle
+  $$("#m_status button").forEach(b=>b.onclick=()=>{
+    $$("#m_status button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+    p.isContractor = b.dataset.st==="contractor";
+    $("#m_grade").disabled=p.isContractor; if(p.isContractor) $("#m_grade").value="";
+    else if(!$("#m_grade").value) $("#m_grade").value=9;
+  });
+  $("#m_addalloc").onclick=()=>{
+    const div=document.createElement("div"); div.className="alloc-row"; div.setAttribute("data-arow","");
+    div.innerHTML=`<select data-ateam>${teamOpt(state.teams[0]?.id)}</select>
+      <input type="number" data-afte min="0" max="1" step="0.1" value="0.5">
+      <button class="btn sm ghost" data-adel>✕</button>`;
+    $("#m_allocs").appendChild(div); bindAllocs(); upSum();
+  };
+  function bindAllocs(){
+    $$("#m_allocs [data-adel]").forEach(b=>b.onclick=()=>{ b.closest("[data-arow]").remove(); upSum(); });
+    $$("#m_allocs [data-afte]").forEach(i=>i.oninput=upSum);
+  }
+  bindAllocs();
+
+  if(!isNew) $("#m_delete").onclick=()=>{
+    state.people=state.people.filter(x=>x.id!==p.id); commit(); closeModal(); toast("Сотрудник удалён");
+  };
+
+  $("#m_save").onclick=()=>{
+    p.name=$("#m_name").value.trim()||"Без имени";
+    p.role=$("#m_role").value; p.location=$("#m_loc").value;
+    p.grade = p.isContractor ? null : clampGrade($("#m_grade").value);
+    p.allocations = $$("#m_allocs [data-arow]").map(r=>({
+      teamId:$("[data-ateam]",r).value, fte:Math.max(0,parseFloat($("[data-afte]",r).value)||0)
+    })).filter(a=>a.fte>0);
+    if(p.allocations.length===0){ toast("Добавьте хотя бы одну аллокацию"); return; }
+    if(isNew) state.people.push(p);
+    else { const idx=state.people.findIndex(x=>x.id===p.id); state.people[idx]=p; }
+    commit(); closeModal();
+  };
+}
+function clampGrade(v){ const n=parseInt(v,10); if(isNaN(n)) return GRADE_MIN; return Math.min(GRADE_MAX,Math.max(GRADE_MIN,n)); }
+
+/* ----- settings (roles / locations / teams) ----- */
+function settingsModal(){
+  const listMgr=(items,key)=>items.map((it,i)=>`
+    <div class="item" data-ditem="${key}:${i}">
+      <input value="${esc(it)}" data-edit="${key}:${i}">
+      <button class="btn sm ghost" data-up="${key}:${i}">↑</button>
+      <button class="btn sm ghost" data-down="${key}:${i}">↓</button>
+      <button class="btn sm ghost" data-rm="${key}:${i}" style="color:var(--bad)">✕</button>
+    </div>`).join("");
+
+  openModal(`<div class="modal wide">
+    <h3><span class="icon">⚙</span>Справочники</h3>
+    <div class="content">
+      <div class="row" style="align-items:flex-start">
+        <div class="field"><label>Роли</label>
+          <div class="listmgr" id="s_roles">${listMgr(state.roles,"roles")}</div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input class="f" id="s_newrole" placeholder="Новая роль" style="flex:1">
+            <button class="btn sm" data-add="roles">Добавить</button></div></div>
+        <div class="field"><label>Локации</label>
+          <div class="listmgr" id="s_locations">${listMgr(state.locations,"locations")}</div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input class="f" id="s_newloc" placeholder="Новая локация" style="flex:1">
+            <button class="btn sm" data-add="locations">Добавить</button></div></div>
+      </div>
+      <div class="field"><label>Команды (${state.teams.length})</label>
+        <div class="listmgr" id="s_teams">
+          ${state.teams.map(t=>`<div class="item">
+            <span class="team-color" style="background:${t.color||'#4f8cff'}"></span>
+            <input value="${esc(t.name)}" data-tname="${t.id}">
+            <input type="color" value="${t.color||'#4f8cff'}" data-tcolor="${t.id}" style="width:34px;padding:2px;flex:none">
+            <button class="btn sm ghost" data-trm="${t.id}" style="color:var(--bad)">✕</button></div>`).join("")}
+        </div>
+        <button class="btn sm" id="s_addteam" style="align-self:flex-start;margin-top:6px">＋ команда</button></div>
+      <span class="hint">Изменения справочников применяются сразу. Удаление роли/локации не трогает сотрудников — у них останется прежнее значение.</span>
+    </div>
+    <div class="foot"><button class="btn primary" onclick="closeModal()">Готово</button></div></div>`);
+
+  const rebind=()=>settingsModal(); // перерисовать после структурных изменений
+
+  // add to roles/locations
+  $$("[data-add]").forEach(b=>b.onclick=()=>{
+    const key=b.dataset.add; const inp=key==="roles"?$("#s_newrole"):$("#s_newloc");
+    const v=inp.value.trim(); if(!v) return;
+    if(!state[key].includes(v)) state[key].push(v); commit(); rebind();
+  });
+  // edit inline roles/locations
+  $$("[data-edit]").forEach(inp=>inp.onchange=()=>{
+    const [key,i]=inp.dataset.edit.split(":"); state[key][+i]=inp.value.trim()||state[key][+i]; commit();
+  });
+  $$("[data-rm]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.rm.split(":"); state[key].splice(+i,1); commit(); rebind(); });
+  $$("[data-up]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.up.split(":"); const a=+i; if(a>0){ [state[key][a-1],state[key][a]]=[state[key][a],state[key][a-1]]; commit(); rebind(); } });
+  $$("[data-down]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.down.split(":"); const a=+i; if(a<state[key].length-1){ [state[key][a+1],state[key][a]]=[state[key][a],state[key][a+1]]; commit(); rebind(); } });
+
+  // teams
+  $$("[data-tname]").forEach(inp=>inp.onchange=()=>{ const t=state.teams.find(x=>x.id===inp.dataset.tname); t.name=inp.value.trim()||t.name; commit(); });
+  $$("[data-tcolor]").forEach(inp=>inp.oninput=()=>{ const t=state.teams.find(x=>x.id===inp.dataset.tcolor); t.color=inp.value; commit(); });
+  $$("[data-trm]").forEach(b=>b.onclick=()=>{
+    const id=b.dataset.trm; const m=teamMetrics(id);
+    if(m.head>0 && !confirm(`В команде есть участники (${m.head}). Удалить команду и снять их аллокации?`)) return;
+    state.teams=state.teams.filter(t=>t.id!==id);
+    for(const p of state.people) p.allocations=p.allocations.filter(a=>a.teamId!==id);
+    state.people=state.people.filter(p=>p.allocations.length>0); // осиротевших убираем
+    commit(); rebind();
+  });
+  $("#s_addteam").onclick=()=>{
+    const palette=["#4f8cff","#6ee7b7","#e0a516","#a855f7","#e5484d","#22d3ee","#f472b6","#34d399"];
+    state.teams.push({id:uid("t"),name:`Команда ${state.teams.length+1}`,color:palette[state.teams.length%palette.length]});
+    commit(); rebind();
+  };
+}
+
+/* ----- snapshots ----- */
+function snapshotModal(){
+  const items = snapshots.length? snapshots.map(s=>`
+    <div class="snap-item ${s.id===baselineId?'baseline':''}">
+      <div class="si-main"><div class="nm">${esc(s.name)} ${s.id===baselineId?'<span class="tag">база</span>':''}</div>
+        <div class="dt">${esc(s.createdAt)} · ${s.doc.teams.length} команд · ${s.doc.people.length} чел.</div></div>
+      <button class="btn sm" data-base="${s.id}">${s.id===baselineId?'снять базу':'сделать базой'}</button>
+      <button class="btn sm" data-restore="${s.id}">восстановить</button>
+      <button class="btn sm ghost" data-export="${s.id}">⬇</button>
+      <button class="btn sm ghost" data-delsnap="${s.id}" style="color:var(--bad)">✕</button>
+    </div>`).join("") : `<div class="hint">Снимков пока нет. Сохраните текущее состояние как базу (as-is), затем экспериментируйте с перестановками и сравнивайте.</div>`;
+
+  openModal(`<div class="modal wide">
+    <h3><span class="icon">⧉</span>Снимки и сравнение (as-is / to-be)</h3>
+    <div class="content">
+      <div style="display:flex;gap:8px">
+        <input class="f" id="snap_name" placeholder="Название снимка, напр. «Базовое состояние»" style="flex:1">
+        <button class="btn primary" id="snap_save">Сохранить текущее</button></div>
+      <div class="listmgr">${items}</div>
+      <span class="hint">«Сделать базой» + галочка «сравнить с базой» в верхней панели подсветит, кто куда переехал, и покажет дельты грейда/FTE по командам.</span>
+    </div>
+    <div class="foot"><button class="btn primary" onclick="closeModal()">Закрыть</button></div></div>`);
+
+  $("#snap_save").onclick=()=>{
+    const name=$("#snap_name").value.trim()||`Снимок ${snapshots.length+1}`;
+    snapshots.push({id:uid("s"),name,createdAt:nowStr(),doc:clone(state)});
+    persist(); snapshotModal(); toast("Снимок сохранён");
+  };
+  $$("[data-base]").forEach(b=>b.onclick=()=>{ baselineId = baselineId===b.dataset.base?null:b.dataset.base; if(!baselineId) ui.compare=false; persist(); snapshotModal(); render(); });
+  $$("[data-restore]").forEach(b=>b.onclick=()=>{ const s=snapshots.find(x=>x.id===b.dataset.restore);
+    if(confirm(`Восстановить состояние «${s.name}»? Текущее будет заменено (можно отменить через Ctrl+Z).`)){ state=clone(s.doc); commit(); closeModal(); toast("Состояние восстановлено"); } });
+  $$("[data-export]").forEach(b=>b.onclick=()=>{ const s=snapshots.find(x=>x.id===b.dataset.export); downloadJSON(s.doc, `snapshot-${s.name}`); });
+  $$("[data-delsnap]").forEach(b=>b.onclick=()=>{ const id=b.dataset.delsnap; snapshots=snapshots.filter(s=>s.id!==id); if(baselineId===id){baselineId=null;ui.compare=false;} persist(); snapshotModal(); render(); });
+}
+function nowStr(){ const d=new Date(); const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+
+/* ============================================================ *
+ *  Import / Export
+ * ============================================================ */
+function downloadJSON(obj, name){
+  const blob=new Blob([JSON.stringify(obj,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=`${name}.json`; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function exportAll(){ downloadJSON({state,snapshots,baselineId,version:1}, (state.meta.name||"team-balancer").replace(/\s+/g,"_")); }
+function importFile(file){
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const d=JSON.parse(r.result);
+      if(d.state && d.state.teams){ state=d.state; snapshots=d.snapshots||[]; baselineId=d.baselineId||null; }
+      else if(d.teams && d.people){ state=d; } // допускаем «голый» документ
+      else throw 0;
+      history=[]; hpos=-1; pushHistory(); persist(); render(); toast("Данные загружены");
+    }catch(e){ toast("Не удалось прочитать файл"); }
+  };
+  r.readAsText(file);
+}
+
+/* ----- PNG export (best-effort, SVG foreignObject; fallback → print) ----- */
+async function exportPNG(){
+  try{
+    const node=$("#board");
+    const w=node.scrollWidth, h=node.scrollHeight;
+    const cssText=[...document.styleSheets].map(ss=>{ try{return [...ss.cssRules].map(r=>r.cssText).join("\n");}catch(_){return"";} }).join("\n");
+    const xhtml=new XMLSerializer().serializeToString(node);
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+      <foreignObject width="100%" height="100%">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="background:#0f1420;padding:14px;width:${w}px">
+          <style>${cssText}</style>${xhtml}
+        </div></foreignObject></svg>`;
+    const img=new Image();
+    const blob=new Blob([svg],{type:"image/svg+xml;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; img.src=url; });
+    const scale=2, cv=document.createElement("canvas");
+    cv.width=w*scale; cv.height=h*scale; const ctx=cv.getContext("2d");
+    ctx.fillStyle="#0f1420"; ctx.fillRect(0,0,cv.width,cv.height); ctx.scale(scale,scale);
+    ctx.drawImage(img,0,0); URL.revokeObjectURL(url);
+    cv.toBlob(b=>{ if(!b) throw 0; const a=document.createElement("a");
+      a.href=URL.createObjectURL(b); a.download=`${(state.meta.name||"board").replace(/\s+/g,"_")}.png`; a.click(); });
+    toast("PNG сохранён");
+  }catch(e){
+    toast("PNG не вышел — открываю печать (можно сохранить в PDF)");
+    setTimeout(()=>window.print(),400);
+  }
+}
+
+/* ============================================================ *
+ *  Toast
+ * ============================================================ */
+let toastT=null;
+function toast(msg){
+  const r=$("#toastRoot"); r.innerHTML=`<div class="toast">${esc(msg)}</div>`;
+  clearTimeout(toastT); toastT=setTimeout(()=>r.innerHTML="",2200);
+}
+
+/* ============================================================ *
+ *  Wire up
+ * ============================================================ */
+$("#addPerson").onclick=()=>personModal(null, state.teams[0]?.id);
+$("#addTeam").onclick=()=>{
+  const palette=["#4f8cff","#6ee7b7","#e0a516","#a855f7","#e5484d","#22d3ee","#f472b6"];
+  state.teams.push({id:uid("t"),name:`Команда ${state.teams.length+1}`,color:palette[state.teams.length%palette.length]});
+  commit();
+};
+$("#undo").onclick=undo; $("#redo").onclick=redo;
+$("#snapBtn").onclick=snapshotModal;
+$("#settingsBtn").onclick=settingsModal;
+$("#saveBtn").onclick=exportAll;
+$("#loadBtn").onclick=()=>$("#fileInput").click();
+$("#fileInput").onchange=e=>{ if(e.target.files[0]) importFile(e.target.files[0]); e.target.value=""; };
+$("#pngBtn").onclick=exportPNG;
+$("#printBtn").onclick=()=>window.print();
+
+$("#projName").onchange=e=>{ state.meta.name=e.target.value; commit(); };
+$("#searchInput").oninput=e=>{ ui.search=e.target.value; render(); };
+$("#filterRole").onchange=e=>{ ui.fRole=e.target.value; render(); };
+$("#filterLoc").onchange=e=>{ ui.fLoc=e.target.value; render(); };
+$("#filterStatus").onchange=e=>{ ui.fStatus=e.target.value; render(); };
+$("#filterMode").onchange=e=>{ ui.fHide=e.target.checked; render(); };
+$("#compareToggle").onchange=e=>{ ui.compare=e.target.checked; render(); };
+
+// делегирование кликов по доске
+$("#board").addEventListener("click",e=>{
+  const chip=e.target.closest("[data-edit]");
+  if(chip){ const c=e.target.closest(".chip"); const p=state.people.find(x=>x.id===c.dataset.personId); personModal(p); return; }
+  const addHere=e.target.closest("[data-addhere]");
+  if(addHere){ const t=e.target.closest(".team"); personModal(null,t.dataset.teamId); return; }
+  const addRole=e.target.closest("[data-addrole]");
+  if(addRole){ const t=e.target.closest(".team");
+    quickAdd(t.dataset.teamId, addRole.dataset.addrole); return; }
+  const delTeam=e.target.closest("[data-delteam]");
+  if(delTeam){ const t=e.target.closest(".team"); const m=teamMetrics(t.dataset.teamId);
+    if(m.head>0 && !confirm(`Удалить команду? Участников: ${m.head}, их аллокации в этой команде будут сняты.`)) return;
+    const id=t.dataset.teamId; state.teams=state.teams.filter(x=>x.id!==id);
+    for(const p of state.people) p.allocations=p.allocations.filter(a=>a.teamId!==id);
+    state.people=state.people.filter(p=>p.allocations.length>0); commit(); return; }
+});
+$("#board").addEventListener("change",e=>{
+  const rn=e.target.closest("[data-rename]");
+  if(rn){ const t=state.teams.find(x=>x.id===e.target.closest(".team").dataset.teamId);
+    t.name=rn.value.trim()||t.name; commit(); }
+});
+function quickAdd(teamId, role){
+  personModal({id:uid("p"),name:"",role,grade:9,isContractor:false,
+    location:state.locations[0]||"",allocations:[{teamId,fte:1}]});
+}
+
+document.addEventListener("keydown",e=>{
+  if(e.target.matches("input,select,textarea")) return;
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
+  if((e.ctrlKey||e.metaKey)&&(e.key.toLowerCase()==="y"||(e.shiftKey&&e.key.toLowerCase()==="z"))){ e.preventDefault(); redo(); }
+});
+
+/* ============================================================ *
+ *  Boot
+ * ============================================================ */
+load();
+pushHistory();
+render();
+window.closeModal=closeModal; // для inline onclick
+</script>
+</body>
+</html>
