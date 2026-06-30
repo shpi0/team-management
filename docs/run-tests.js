@@ -788,22 +788,24 @@ const FX_ROUNDTRIP = () => {
   await T('TC-11.2', 'P1', 'Переименование роли инлайн', async () => {
     await bootFixture(page, FX());
     await page.locator('#settingsBtn').click();
-    const inp = page.locator('#s_roles [data-edit="roles:0"]');
-    await inp.fill('Backend2'); await inp.dispatchEvent('change');
+    const inp = page.locator('#s_roles [data-roleedit="0"]');
+    // переименование коммитится по реальному blur (как при Tab/клике мимо); rebind() перерисовывает
+    // справочник. Синтетический change на сфокусированном input не отражает реальное поведение.
+    await inp.fill('Backend2'); await inp.blur();
     await page.waitForTimeout(80);
     eq((await lsGet(page)).state.roles[0], 'Backend2', 'role renamed');
   });
   await T('TC-11.3', 'P1', 'Перемещение роли ↑/↓ меняет порядок', async () => {
     await bootFixture(page, FX());
     await page.locator('#settingsBtn').click();
-    await page.locator('#s_roles [data-down="roles:0"]').click();
+    await page.locator('#s_roles [data-roledown="0"]').click();
     await page.waitForTimeout(80);
     eq((await lsGet(page)).state.roles[0], 'QA', 'QA moved to front');
   });
   await T('TC-11.4', 'P1', 'Удаление роли не меняет людей', async () => {
     await bootFixture(page, FX());
     await page.locator('#settingsBtn').click();
-    await page.locator('#s_roles [data-rm="roles:0"]').click(); // remove Backend
+    await page.locator('#s_roles [data-rolerm="0"]').click(); // remove Backend
     await page.waitForTimeout(80);
     const ls = await lsGet(page);
     assert(!ls.state.roles.includes('Backend'), 'role removed from dict');
