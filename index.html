@@ -126,6 +126,13 @@
   .chip .edit{opacity:0;transition:.1s;color:var(--muted);background:none;border:0;padding:2px 4px}
   .chip:hover .edit{opacity:1}
   .chip .edit:hover{color:var(--text)}
+  .chip.vacancy{border-style:dashed;border-color:#46557a;background:#131a28}
+  .chip.vacancy .grade{opacity:.85}
+  .vac-name{font-weight:700;color:var(--muted);font-style:italic;letter-spacing:.02em}
+  .vac-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
+  .vac-chip{font-size:10px;font-weight:600;line-height:1.3;border-radius:5px;padding:0 5px;white-space:nowrap}
+  .vac-chip.proj{background:rgba(79,140,255,.16);color:#bcd0ff;border:1px solid rgba(79,140,255,.5)}
+  .vac-chip.temp{background:rgba(224,165,22,.16);color:#f4d98a;border:1px solid rgba(224,165,22,.5)}
   .chip.dim{opacity:.25;filter:grayscale(.6)}
   .chip.hit{box-shadow:0 0 0 2px var(--warn)}
   .chip.moved-in{box-shadow:0 0 0 2px var(--good)}
@@ -136,6 +143,8 @@
   .tfoot{padding:8px 10px;border-top:1px solid var(--line)}
   .empty-team{color:var(--muted);font-size:12px;text-align:center;padding:14px 6px;border:1px dashed var(--line);border-radius:8px;margin:6px}
 
+  .vac-strip{font-size:11px;color:#cdb37a;padding:4px 12px 0}
+  .vac-strip b{color:#f4d98a}
   /* diff strip for compare */
   .diff-strip{font-size:11px;color:var(--muted);padding:2px 12px 0}
   .delta.up{color:var(--good)} .delta.down{color:var(--bad)}
@@ -152,8 +161,12 @@
   .modal .foot{padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
   .field{display:flex;flex-direction:column;gap:5px}
   .field label{color:var(--muted);font-size:12px;font-weight:600}
-  .field input,.field select{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+  .field input,.field select,.field textarea{background:var(--panel2);border:1px solid var(--line);color:var(--text);
     border-radius:8px;padding:8px 10px;font:inherit}
+  .field textarea{resize:vertical;min-height:38px}
+  .vac-check{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:9px 11px;font-size:13px;color:var(--text);cursor:pointer}
+  .vac-check input{width:16px;height:16px;flex:none}
   .row{display:flex;gap:12px}.row>*{flex:1}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
   .seg button{background:var(--panel2);border:0;padding:8px 14px;color:var(--muted)}
@@ -293,31 +306,41 @@ function seed(){
     T("Платёжный шлюз","#4f8cff"), T("Карты и счета","#6ee7b7"),
     T("Антифрод","#e0a516"), T("Мобильный банк","#a855f7"),
   ];
-  const P=(name,role,grade,contractor,loc,allocs,tags)=>({
-    id:uid("p"),name,role,grade:contractor?null:grade,isContractor:contractor,location:loc,
-    tags:tags||[],
+  const projects = ["Платежи 2.0","Открытие счетов","ML-скоринг"];
+  const P=(name,role,grade,contractor,loc,allocs,tags,comment)=>({
+    id:uid("p"),name,role,grade:contractor?null:grade,isContractor:contractor,isVacancy:false,location:loc,
+    tags:tags||[],comment:comment||"",project:"",expiry:"",
+    allocations:allocs.map(a=>({teamId:teams[a[0]].id,fte:a[1]}))
+  });
+  // ставка (вакансия): без имени, штатная; опционально проект и срок действия
+  const V=(role,grade,allocs,project,expiry,tags)=>({
+    id:uid("p"),name:"",role,grade,isContractor:false,isVacancy:true,location:"",
+    tags:tags||[],comment:"",project:project||"",expiry:expiry||"",
     allocations:allocs.map(a=>({teamId:teams[a[0]].id,fte:a[1]}))
   });
   const people = [
-    P("Алексей Орлов","Backend",11,false,"Москва",[[0,1]],["Kafka","Tech Lead"]),
+    P("Алексей Орлов","Backend",11,false,"Москва",[[0,1]],["Kafka","Tech Lead"],"Тимлид направления, держит на себе платёжное ядро."),
     P("Дмитрий Сухов","Backend",9,false,"Минск",[[0,0.5],[2,0.5]],["Go"]),
     P("Игорь Лапин","Frontend",8,false,"Ереван",[[0,1]],["React"]),
     P("Сергей Котов","QA",8,false,"Санкт-Петербург",[[0,1]],["Automation"]),
     P("External: J. Doe","Backend",null,true,"Тбилиси",[[0,1]]),
+    V("QA",9,[[0,1]],"","",["Automation"]),                    // обычная ставка
     P("Мария Зуева","SA",12,false,"Москва",[[1,0.5],[3,0.5]],["Архитектура","ML"]),
     P("Павел Гром","Backend",10,false,"Москва",[[1,1]],["Java","Payments"]),
     P("Ольга Тимина","BA",9,false,"Минск",[[1,1]]),
     P("External: A. Smith","Frontend",null,true,"Ереван",[[1,1]],["Vue"]),
+    V("Backend",10,[[1,1]],"Открытие счетов","",["Java"]),     // ставка под проект
     P("Никита Волк","Backend",12,false,"Москва",[[2,1]],["Security"]),
     P("Елена Рой","Data Engineer",11,false,"Москва",[[2,1]],["Spark","Airflow"]),
     P("External: K. Ivanov","AT",null,true,"Минск",[[2,1]]),
+    V("Data Engineer",10,[[2,1]],"ML-скоринг","2026-12-31",["Spark"]), // временная ставка под проект
     P("Роман Дуб","Frontend",10,false,"Санкт-Петербург",[[3,1]],["React Native"]),
     P("Анна Лис","Backend",8,false,"Тбилиси",[[3,1]]),
     P("Виктор Сом","QA",7,false,"Ереван",[[3,0.5]]),
   ];
   const roleColors = { Backend:"#3b82f6", Frontend:"#10b981", SA:"#f59e0b", BA:"#a855f7",
     QA:"#ef4444", AT:"#06b6d4", "Data Engineer":"#84cc16" };
-  return { meta:{name:"Кластер продуктовой разработки",version:1}, roles, roleColors, locations, teams, people };
+  return { meta:{name:"Кластер продуктовой разработки",version:1}, roles, roleColors, locations, projects, teams, people };
 }
 
 /* ============================================================ *
@@ -336,6 +359,7 @@ function normalizeDoc(input){
   const src = (input && typeof input==="object") ? input : {};
   const roles     = uniqStrings(src.roles);
   const locations = uniqStrings(src.locations);
+  const projects  = uniqStrings(src.projects);   // справочник проектов для ставок
   // цвета ролей: только валидные hex6
   const roleColors = {};
   if(src.roleColors && typeof src.roleColors==="object"){
@@ -366,20 +390,31 @@ function normalizeDoc(input){
     let id = asStr(p.id);
     if(!SAFE_ID.test(id) || seenPerson.has(id)) id = freshId("p",seenPerson);
     seenPerson.add(id);
-    const isContractor = !!p.isContractor;
+    const isVacancy = !!p.isVacancy;
+    const isContractor = isVacancy ? false : !!p.isContractor;  // ставка всегда штатная
+    // грейд: у подрядчика null; у ставки опционален (пусто → null); у штатного — клампится (дефолт GRADE_MIN)
     let grade = null;
-    if(!isContractor){ const n=parseInt(p.grade,10); grade = isNaN(n)?GRADE_MIN:Math.min(GRADE_MAX,Math.max(GRADE_MIN,n)); }
+    if(!isContractor){
+      const raw = p.grade;
+      if(raw==null || raw===""){ grade = isVacancy ? null : GRADE_MIN; }
+      else { const n=parseInt(raw,10); grade = isNaN(n) ? (isVacancy?null:GRADE_MIN) : Math.min(GRADE_MAX,Math.max(GRADE_MIN,n)); }
+    }
+    const expiry = isVacancy && /^\d{4}-\d{2}-\d{2}$/.test(asStr(p.expiry).trim()) ? asStr(p.expiry).trim() : "";
+    const project = isVacancy ? asStr(p.project).trim() : "";
     const allocations = (Array.isArray(p.allocations)?p.allocations:[])
       .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
       .filter(a=> a.fte>0 && validTeam.has(a.teamId));
-    return { id, name: asStr(p.name,"Без имени")||"Без имени", role: asStr(p.role).trim(),
-             grade, isContractor, location: asStr(p.location).trim(), tags: normTags(p.tags), allocations };
+    return { id, name: isVacancy ? "" : (asStr(p.name,"Без имени")||"Без имени"),
+             role: asStr(p.role).trim(), grade, isContractor, isVacancy,
+             location: isVacancy ? "" : asStr(p.location).trim(),
+             project, expiry, comment: asStr(p.comment),
+             tags: normTags(p.tags), allocations };
   }).filter(p=> p.allocations.length>0);   // люди без валидных аллокаций отбрасываются
 
   const meta = (src.meta && typeof src.meta==="object")
     ? { name: asStr(src.meta.name,"Кластер")||"Кластер", version:1 }
     : { name:"Кластер", version:1 };
-  return { meta, roles, roleColors, locations, teams, people };
+  return { meta, roles, roleColors, locations, projects, teams, people };
 }
 
 function normalizeSnapshots(arr){
@@ -434,11 +469,12 @@ function redo(){ if(hpos<history.length-1){ hpos++; state=clone(history[hpos]); 
  *  Metrics & balance
  * ============================================================ */
 function teamMetrics(teamId, doc=state){
-  let fte=0, head=0, gradeW=0, gradeFte=0, contrFte=0;
+  let fte=0, head=0, gradeW=0, gradeFte=0, contrFte=0, vacancies=0, vacancyFte=0;
   const locs={};
   for(const p of doc.people){
     for(const a of p.allocations){
       if(a.teamId!==teamId) continue;
+      if(p.isVacancy){ vacancies++; vacancyFte+=a.fte; continue; } // ставки (вакансии) — отдельно, не в укомплектованности
       fte+=a.fte; head++;
       if(p.isContractor) contrFte+=a.fte;
       else if(p.grade!=null){ gradeW+=p.grade*a.fte; gradeFte+=a.fte; }
@@ -446,7 +482,7 @@ function teamMetrics(teamId, doc=state){
     }
   }
   return {
-    fte, head, gradeFte,
+    fte, head, gradeFte, vacancies, vacancyFte,
     avgGrade: gradeFte>0 ? gradeW/gradeFte : null,
     contrShare: fte>0 ? contrFte/fte : 0,
     locs
@@ -467,8 +503,9 @@ function clusterStats(doc=state){
     share:{mean:mean(shares),std:std(shares)},
     fte:{mean:mean(ftes),std:std(ftes)},
     totalFte: ftes.reduce((s,v)=>s+v,0),
-    totalHead: doc.people.length,
-    contractors: doc.people.filter(p=>p.isContractor).length,
+    totalHead: doc.people.filter(p=>!p.isVacancy).length,
+    contractors: doc.people.filter(p=>p.isContractor && !p.isVacancy).length,
+    vacancies: doc.people.filter(p=>p.isVacancy).length,
   };
 }
 function zFlag(val, ref){
@@ -542,14 +579,28 @@ function fillSelect(sel, items, val, allLabel){
 function renderAnalytics(stats){
   const avgAll = (()=>{ let w=0,f=0; for(const x of stats.per){ if(x.m.avgGrade!=null){w+=x.m.avgGrade*x.m.gradeFte;f+=x.m.gradeFte;} } return f?w/f:null; })();
   const contrPct = stats.totalFte? Math.round(stats.per.reduce((s,x)=>s+x.m.contrShare*x.m.fte,0)/stats.totalFte*100):0;
-  // локации по кластеру
+  // локации по кластеру (вакансии без локации не учитываем)
   const locAgg={};
-  for(const p of state.people){ for(const a of p.allocations){ const l=p.location||"—"; locAgg[l]=(locAgg[l]||0)+a.fte; } }
+  for(const p of state.people){ if(p.isVacancy) continue; for(const a of p.allocations){ const l=p.location||"—"; locAgg[l]=(locAgg[l]||0)+a.fte; } }
   const locTop = Object.entries(locAgg).sort((a,b)=>b[1]-a[1]);
   const totFte = Object.values(locAgg).reduce((s,v)=>s+v,0)||1;
   const palette=["#4f8cff","#6ee7b7","#e0a516","#a855f7","#e5484d","#22d3ee","#f472b6"];
 
-  $("#anHint").textContent = `${state.teams.length} команд · ${stats.totalHead} человек`;
+  // ставки (вакансии): обычные / проектные / временные (категории «с проектом» и «со сроком» могут пересекаться)
+  const vac = state.people.filter(p=>p.isVacancy);
+  const vacProj = vac.filter(p=>p.project).length;
+  const vacTemp = vac.filter(p=>p.expiry).length;
+  const vacStd  = vac.filter(p=>!p.project && !p.expiry).length;
+
+  // распределение по тегам (навыки), вакансии тоже учитываются
+  const tagAgg={};
+  for(const p of state.people){ for(const t of (p.tags||[])) tagAgg[t]=(tagAgg[t]||0)+1; }
+  const tagTop = Object.entries(tagAgg).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const tagMax = tagTop.length ? tagTop[0][1] : 1;
+
+  const unbalanced = stats.per.filter(x=>zFlag(x.m.avgGrade,stats.grade).level!=="good"||zFlag(x.m.contrShare,stats.share).level!=="good").length;
+
+  $("#anHint").textContent = `${state.teams.length} команд · ${stats.totalHead} человек · ${stats.vacancies} ставок`;
   $("#analyticsBody").innerHTML = `
     <div class="stat"><div class="k">Средний грейд</div>
       <div class="v">${avgAll!=null?avgAll.toFixed(1):"—"}</div>
@@ -560,13 +611,24 @@ function renderAnalytics(stats){
     <div class="stat"><div class="k">Суммарный FTE</div>
       <div class="v">${stats.totalFte.toFixed(1)}</div>
       <div class="sub">средн. ${(stats.totalFte/Math.max(1,state.teams.length)).toFixed(1)} на команду</div></div>
-    <div class="stat"><div class="k">Команды-выбросы</div>
-      <div class="v">${stats.per.filter(x=>zFlag(x.m.avgGrade,stats.grade).level!=="good"||zFlag(x.m.contrShare,stats.share).level!=="good").length}</div>
-      <div class="sub">по грейду / подрядчикам</div></div>
-    <div class="stat" style="grid-column:span 2"><div class="k">Распределение по локациям</div>
-      ${locTop.map((l,i)=>`<div class="barrow"><span class="lbl" title="${esc(l[0])}">${esc(l[0])}</span>
+    <div class="stat"><div class="k">Несбалансированные команды</div>
+      <div class="v">${unbalanced}<span class="hint" style="font-size:13px"> из ${state.teams.length}</span></div>
+      <div class="sub">сильное отклонение среднего грейда или доли подрядчиков от среднего по кластеру</div></div>
+    <div class="stat"><div class="k">Открытые ставки</div>
+      <div class="v">${vac.length}</div>
+      <div class="sub">обычных ${vacStd} · проектных ${vacProj} · временных ${vacTemp}</div></div>
+    <div class="stat"><div class="k">Команд / людей</div>
+      <div class="v">${state.teams.length}<span class="hint" style="font-size:13px"> / ${stats.totalHead}</span></div>
+      <div class="sub">штат+подрядчики, без ставок</div></div>
+    <div class="stat" style="grid-column:span 2"><div class="k">Распределение по локациям (FTE)</div>
+      ${locTop.length? locTop.map((l,i)=>`<div class="barrow"><span class="lbl" title="${esc(l[0])}">${esc(l[0])}</span>
         <span class="track"><span class="fill" style="width:${(l[1]/totFte*100).toFixed(0)}%;background:${palette[i%palette.length]}"></span></span>
-        <span class="hint">${l[1].toFixed(1)}</span></div>`).join("")}
+        <span class="hint">${l[1].toFixed(1)}</span></div>`).join("") : '<div class="sub">нет данных</div>'}
+    </div>
+    <div class="stat" style="grid-column:span 2"><div class="k">Топ тегов (навыки)</div>
+      ${tagTop.length? tagTop.map((t,i)=>`<div class="barrow"><span class="lbl" title="${esc(t[0])}">${esc(t[0])}</span>
+        <span class="track"><span class="fill" style="width:${(t[1]/tagMax*100).toFixed(0)}%;background:${palette[i%palette.length]}"></span></span>
+        <span class="hint">${t[1]}</span></div>`).join("") : '<div class="sub">тегов нет</div>'}
     </div>`;
 }
 
@@ -609,6 +671,7 @@ function renderTeam(team, stats, baseMap, baseStats){
         <div class="metric"><div class="ml">FTE / чел.</div>
           <div class="mv">${m.fte.toFixed(1)}<span class="hint" style="font-size:12px">/${m.head}</span></div></div>
       </div>
+      ${m.vacancies>0 ? `<div class="vac-strip" title="Открытые штатные ставки (вакансии)">🪧 Открытые ставки: <b>${m.vacancies}</b> · ${m.vacancyFte.toFixed(1)} FTE</div>` : ""}
       ${diff}
     </div>
     <div class="members" data-drop></div>
@@ -644,7 +707,7 @@ function renderTeam(team, stats, baseMap, baseStats){
 
 function renderChip(p, alloc, teamId, baseMap){
   const c=document.createElement("div");
-  c.className="chip"+(p.isContractor?" contractor":"");
+  c.className="chip"+(p.isContractor?" contractor":"")+(p.isVacancy?" vacancy":"");
   c.draggable=true;
   c.dataset.personId=p.id; c.dataset.teamId=teamId;
 
@@ -659,19 +722,34 @@ function renderChip(p, alloc, teamId, baseMap){
     if(!was || !was.has(teamId)) c.classList.add("moved-in");
   }
 
+  const gradeText = p.grade ?? (p.isVacancy ? "—" : "?");
   const gradeBox = p.isContractor
     ? `<div class="grade" title="Подрядчик">ПД</div>`
     : ui.hideGrades
       ? `<div class="grade masked" style="background:${roleColor(p.role)}" title="Грейд скрыт">•••</div>`
-      : `<div class="grade" style="background:${roleColor(p.role)}" title="Грейд · ${esc(p.role||'—')}">${p.grade??"?"}</div>`;
+      : `<div class="grade" style="background:${roleColor(p.role)}" title="Грейд · ${esc(p.role||'—')}">${gradeText}</div>`;
   const fteBadge = alloc.fte<1 ? `<span class="fte" title="Доля занятости">${alloc.fte.toFixed(2).replace(/\.?0+$/,"")} FTE</span>`:"";
   const contrBadge = p.isContractor ? `<span class="badge contr">подряд</span>`:"";
   const tagsRow = (p.tags && p.tags.length)
     ? `<div class="tags">${p.tags.map(t=>`<span class="tag-pill">${esc(t)}</span>`).join("")}</div>` : "";
 
+  let nameHtml, metaHtml, vacRow="";
+  if(p.isVacancy){
+    nameHtml = `<span class="vac-name">Вакансия</span>`;
+    metaHtml = esc(p.role||"—");
+    const chips = [
+      p.project ? `<span class="vac-chip proj" title="Проект">▣ ${esc(p.project)}</span>` : "",
+      p.expiry  ? `<span class="vac-chip temp" title="Срок действия ставки">⏳ до ${esc(p.expiry)}</span>` : ""
+    ].join("");
+    if(chips) vacRow = `<div class="vac-chips">${chips}</div>`;
+  } else {
+    nameHtml = `${esc(p.name)} ${contrBadge}`;
+    metaHtml = `${esc(p.role||"—")} · ${esc(p.location||"—")}`;
+  }
+
   c.innerHTML = `${gradeBox}
-    <div class="nm"><div class="name">${esc(p.name)} ${contrBadge}</div>
-      <div class="meta">${esc(p.role||"—")} · ${esc(p.location||"—")}</div>${tagsRow}</div>
+    <div class="nm"><div class="name">${nameHtml}</div>
+      <div class="meta">${metaHtml}</div>${vacRow}${tagsRow}</div>
     ${fteBadge}
     <button class="edit" data-edit title="Редактировать">✎</button>`;
   return c;
@@ -757,11 +835,13 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
 function personModal(person, defaultTeamId, defaultRole){
   const isNew=!person;
   const p = person ? clone(person) : {
-    id:uid("p"), name:"", role:defaultRole||state.roles[0]||"", grade:9, isContractor:false,
-    location:state.locations[0]||"", tags:[], allocations: defaultTeamId?[{teamId:defaultTeamId,fte:1}]:[]
+    id:uid("p"), name:"", role:defaultRole||state.roles[0]||"", grade:9, isContractor:false, isVacancy:false,
+    location:state.locations[0]||"", tags:[], comment:"", project:"", expiry:"",
+    allocations: defaultTeamId?[{teamId:defaultTeamId,fte:1}]:[]
   };
   const roleOpts=state.roles.map(r=>`<option ${r===p.role?"selected":""}>${esc(r)}</option>`).join("");
   const locOpts=state.locations.map(r=>`<option ${r===p.location?"selected":""}>${esc(r)}</option>`).join("");
+  const projOpts=`<option value="">— без проекта —</option>`+(state.projects||[]).map(pr=>`<option ${pr===p.project?"selected":""}>${esc(pr)}</option>`).join("");
   const teamOpt=(sel)=>state.teams.map(t=>`<option value="${t.id}" ${t.id===sel?"selected":""}>${esc(t.name)}</option>`).join("");
 
   const allocRows = (allocs)=>allocs.map((a,i)=>`
@@ -772,26 +852,35 @@ function personModal(person, defaultTeamId, defaultRole){
     </div>`).join("");
 
   openModal(`<div class="modal">
-    <h3><span class="icon">👤</span>${isNew?"Новый сотрудник":"Редактирование"}</h3>
+    <h3><span class="icon">👤</span>${isNew?"Новый сотрудник / ставка":"Редактирование"}</h3>
     <div class="content">
-      <div class="field"><label>Имя / идентификатор</label>
+      <label class="vac-check"><input type="checkbox" id="m_vacancy" ${p.isVacancy?'checked':''}>
+        Это <b>ставка</b> (вакансия) — штатная позиция без сотрудника (имя не указывается)</label>
+      <div class="field" id="m_name_field"><label>Имя / идентификатор</label>
         <input id="m_name" value="${esc(p.name)}" placeholder="Фамилия Имя"></div>
       <div class="row">
-        <div class="field"><label>Статус</label>
+        <div class="field" id="m_status_field"><label>Статус</label>
           <div class="seg" id="m_status">
             <button data-st="staff" class="${p.isContractor?'':'on'}">Штат</button>
             <button data-st="contractor" class="${p.isContractor?'on':''}">Подрядчик</button>
           </div></div>
-        <div class="field"><label>Грейд</label>
+        <div class="field"><label>Грейд<span class="hint" id="m_grade_opt"></span></label>
           <input id="m_grade" type="number" min="${GRADE_MIN}" max="${GRADE_MAX}" value="${p.grade??''}"
             ${p.isContractor?'disabled':''}></div>
       </div>
       <div class="row">
         <div class="field"><label>Роль</label><select id="m_role">${roleOpts}</select></div>
-        <div class="field"><label>Локация</label><select id="m_loc">${locOpts}</select></div>
+        <div class="field" id="m_loc_field"><label>Локация</label><select id="m_loc">${locOpts}</select></div>
+      </div>
+      <div class="row" id="m_vac_field" style="display:none">
+        <div class="field"><label>Проект (тип ставки)</label><select id="m_project">${projOpts}</select></div>
+        <div class="field"><label>Срок действия (временная ставка)</label>
+          <input id="m_expiry" type="date" value="${esc(p.expiry||'')}"></div>
       </div>
       <div class="field"><label>Теги — уникальные навыки (через запятую; до ${MAX_TAGS} шт., по ${MAX_TAG_LEN} симв.)</label>
         <input id="m_tags" value="${esc((p.tags||[]).join(', '))}" placeholder="напр. Kafka, Tech Lead"></div>
+      <div class="field"><label>Комментарий (виден только в карточке при редактировании, не на доске)</label>
+        <textarea id="m_comment" rows="2" placeholder="заметка о сотруднике/ставке">${esc(p.comment||'')}</textarea></div>
       <div class="field"><label>Аллокации по командам (доли FTE)</label>
         <div class="listmgr" id="m_allocs">${allocRows(p.allocations)}</div>
         <button class="btn sm" id="m_addalloc" style="align-self:flex-start;margin-top:4px">＋ команда</button>
@@ -817,6 +906,19 @@ function personModal(person, defaultTeamId, defaultRole){
     $("#m_grade").disabled=p.isContractor; if(p.isContractor) $("#m_grade").value="";
     else if(!$("#m_grade").value) $("#m_grade").value=9;
   });
+  // vacancy (ставка) toggle: прячем имя/статус/локацию, показываем проект+срок; ставка всегда штатная
+  const applyVacancy=()=>{
+    const v=$("#m_vacancy").checked;
+    $("#m_name_field").style.display = v?"none":"";
+    $("#m_status_field").style.display = v?"none":"";
+    $("#m_loc_field").style.display = v?"none":"";
+    $("#m_vac_field").style.display = v?"":"none";
+    $("#m_grade_opt").textContent = v?" — опционально":"";
+    if(v){ p.isContractor=false; $("#m_grade").disabled=false;
+      $$("#m_status button").forEach(x=>x.classList.toggle("on", x.dataset.st==="staff")); }
+  };
+  $("#m_vacancy").onchange=applyVacancy;
+  applyVacancy();
   $("#m_addalloc").onclick=()=>{
     const div=document.createElement("div"); div.className="alloc-row"; div.setAttribute("data-arow","");
     div.innerHTML=`<select data-ateam>${teamOpt(state.teams[0]?.id)}</select>
@@ -835,10 +937,19 @@ function personModal(person, defaultTeamId, defaultRole){
   };
 
   $("#m_save").onclick=()=>{
-    p.name=$("#m_name").value.trim()||"Без имени";
-    p.role=$("#m_role").value; p.location=$("#m_loc").value;
+    p.isVacancy=$("#m_vacancy").checked;
+    p.role=$("#m_role").value;
     p.tags=normTags($("#m_tags").value.split(","));
-    p.grade = p.isContractor ? null : clampGrade($("#m_grade").value);
+    p.comment=$("#m_comment").value;
+    if(p.isVacancy){
+      p.isContractor=false; p.name=""; p.location="";
+      p.project=$("#m_project").value; p.expiry=$("#m_expiry").value||"";
+      const gv=$("#m_grade").value; p.grade = gv==="" ? null : clampGrade(gv);
+    } else {
+      p.name=$("#m_name").value.trim()||"Без имени"; p.location=$("#m_loc").value;
+      p.project=""; p.expiry="";
+      p.grade = p.isContractor ? null : clampGrade($("#m_grade").value);
+    }
     p.allocations = $$("#m_allocs [data-arow]").map(r=>({
       teamId:$("[data-ateam]",r).value, fte:Math.max(0,parseFloat($("[data-afte]",r).value)||0)
     })).filter(a=>a.fte>0);
@@ -882,6 +993,11 @@ function settingsModal(){
             <input class="f" id="s_newloc" placeholder="Новая локация" style="flex:1">
             <button class="btn sm" data-add="locations">Добавить</button></div></div>
       </div>
+      <div class="field"><label>Проекты (для типа ставки)</label>
+        <div class="listmgr" id="s_projects">${listMgr(state.projects||[],"projects")}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input class="f" id="s_newproj" placeholder="Новый проект" style="flex:1">
+          <button class="btn sm" data-add="projects">Добавить</button></div></div>
       <div class="field"><label>Команды (${state.teams.length})</label>
         <div class="listmgr" id="s_teams">
           ${state.teams.map(t=>`<div class="item">
@@ -897,19 +1013,22 @@ function settingsModal(){
 
   const rebind=()=>settingsModal(); // перерисовать после структурных изменений
 
-  // add to roles/locations
+  // add to roles/locations/projects
+  if(!state.projects) state.projects=[];
+  const newInp={roles:"#s_newrole",locations:"#s_newloc",projects:"#s_newproj"};
   $$("[data-add]").forEach(b=>b.onclick=()=>{
-    const key=b.dataset.add; const inp=key==="roles"?$("#s_newrole"):$("#s_newloc");
+    const key=b.dataset.add; const inp=$(newInp[key]);
     const v=inp.value.trim(); if(!v) return;
     if(!state[key].includes(v)) state[key].push(v); commit(); rebind();
   });
-  // edit inline locations: настоящее переименование (миграция сотрудников) + запрет дублей
+  // edit inline locations/projects: настоящее переименование (миграция сотрудников/ставок) + запрет дублей
   $$("[data-edit]").forEach(inp=>inp.onchange=()=>{
     const [key,i]=inp.dataset.edit.split(":"); const idx=+i; const old=state[key][idx]; const nv=inp.value.trim();
     if(!nv || nv===old){ inp.value=old; return; }
     if(state[key].some((v,j)=>j!==idx && v===nv)){ toast(`«${nv}» уже есть в справочнике`); inp.value=old; return; }
     state[key][idx]=nv;
     if(key==="locations"){ for(const p of state.people){ if(p.location===old) p.location=nv; } }
+    if(key==="projects"){ for(const p of state.people){ if(p.project===old) p.project=nv; } }
     commit();
   });
   // roles: цвет применяется только на change (единая undo-точка; промежуточные input не мутируют state)

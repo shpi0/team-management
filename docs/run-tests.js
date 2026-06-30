@@ -183,6 +183,18 @@ const FX_ROLECOLORS = () => ({
   }, snapshots: [], baselineId: null, uidCounter: 3000
 });
 
+// фикстура со ставкой (вакансией): реальный сотрудник + вакансия с проектом и сроком
+const FX_VAC = () => ({
+  state: {
+    meta: { name: "Vac", version: 1 }, roles: ["Backend"], roleColors: {}, locations: ["М"], projects: ["Proj1"],
+    teams: [{ id: "tA", name: "A", color: "#4f8cff" }],
+    people: [
+      { id: "r1", name: "Real", role: "Backend", grade: 10, isContractor: false, isVacancy: false, location: "М", tags: [], comment: "note1", project: "", expiry: "", allocations: [{ teamId: "tA", fte: 1 }] },
+      { id: "v1", name: "", role: "Backend", grade: 9, isContractor: false, isVacancy: true, location: "", tags: ["Go"], comment: "", project: "Proj1", expiry: "2026-12-31", allocations: [{ teamId: "tA", fte: 1 }] }
+    ]
+  }, snapshots: [], baselineId: null, uidCounter: 5000
+});
+
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext();
@@ -199,9 +211,10 @@ const FX_ROLECOLORS = () => ({
   await T('TC-1.1', 'P0', 'Чистый старт: 4 команды, 15 карточек', async () => {
     await bootDemo(page);
     eq(await count('.team'), 4, '4 teams');
-    // 15 people but Дмитрий has 2 allocs, Мария 2 allocs => chips = 17
+    // 15 человек (Дмитрий и Мария по 2 аллокации → 17 карточек) + 3 ставки (по 1) = 20 карточек
     const chips = await count('.chip');
-    assert(chips === 17, '17 chips expected (15 people, 2 split into 2), got ' + chips);
+    assert(chips === 20, '20 chips expected (15 people, 2 split into 2, +3 vacancies), got ' + chips);
+    assert(await count('.chip.vacancy') === 3, '3 vacancy chips in seed');
     assert(await count('#analyticsBody .stat') >= 5, 'analytics rendered');
   });
   await T('TC-1.2', 'P0', 'Группировка по ролям', async () => {
@@ -1252,6 +1265,65 @@ const FX_ROLECOLORS = () => ({
     await inp.fill('Минск'); await inp.blur(); await page.waitForTimeout(80);
     assert((await page.locator('#toastRoot .toast').innerText()).includes('уже есть'), 'reject toast');
     eq(await page.locator('#s_locations [data-edit]').first().inputValue(), 'Москва', 'reverted to old value');
+  });
+
+  // ============ TS-17 ставки (вакансии), комментарии, проекты, аналитика ============
+  await T('TC-17.1', 'P0', 'Создание ставки (вакансии): без имени, isVacancy, чип «Вакансия»', async () => {
+    await bootFixture(page, FX()); // roles Backend, QA
+    await page.locator('#addPerson').click(); await page.waitForTimeout(60);
+    await page.locator('#m_vacancy').check(); await page.waitForTimeout(40);
+    eq(await page.locator('#m_name_field').evaluate(el => getComputedStyle(el).display), 'none', 'name field hidden');
+    eq(await page.locator('#m_status_field').evaluate(el => getComputedStyle(el).display), 'none', 'status hidden');
+    assert(await page.locator('#m_vac_field').evaluate(el => getComputedStyle(el).display) !== 'none', 'project/expiry shown');
+    await page.locator('#m_role').selectOption('Backend');
+    await page.locator('#m_grade').fill('10');
+    await page.locator('#m_save').click(); await page.waitForTimeout(80);
+    const v = (await lsGet(page)).state.people.find(p => p.isVacancy);
+    assert(v && v.name === '', 'vacancy has no name');
+    eq(v.role, 'Backend', 'vacancy role'); eq(v.grade, 10, 'vacancy grade');
+    assert((await page.locator('.chip.vacancy .vac-name').first().innerText()).includes('Вакансия'), 'vacancy chip label');
+  });
+  await T('TC-17.2', 'P1', 'Чипсы проекта и срока показываются на ставке', async () => {
+    await bootFixture(page, FX_VAC()); // v1: project Proj1 + expiry
+    const chip = page.locator('.chip.vacancy').first();
+    assert(await chip.locator('.vac-chip.proj').count() === 1, 'project chip shown');
+    assert(await chip.locator('.vac-chip.temp').count() === 1, 'expiry chip shown');
+    assert((await chip.locator('.vac-chip.proj').innerText()).includes('Proj1'), 'project name in chip');
+  });
+  await T('TC-17.3', 'P1', 'Комментарий виден в модалке, но НЕ на доске (Feature 2)', async () => {
+    await bootFixture(page, FX_VAC()); // r1 comment "note1"
+    const chip = page.locator('.chip', { has: page.locator('.name', { hasText: 'Real' }) }).first();
+    assert(!(await chip.innerText()).includes('note1'), 'comment not on board');
+    await chip.locator('[data-edit]').click({ force: true }); await page.waitForTimeout(60);
+    eq(await page.locator('#m_comment').inputValue(), 'note1', 'comment visible in modal');
+  });
+  await T('TC-17.4', 'P1', 'Аналитика: формулировка выбросов + блоки ставок и тегов (Feature 3/5)', async () => {
+    await bootDemo(page);
+    const body = await page.locator('#analyticsBody').innerText();
+    assert(body.includes('Несбалансированные команды'), 'reworded outliers label');
+    assert(!body.includes('Команды-выбросы'), 'old label gone');
+    assert(body.includes('Открытые ставки'), 'vacancy breakdown card');
+    assert(body.includes('Топ тегов'), 'tags analytics card');
+  });
+  await T('TC-17.5', 'P1', 'Справочник проектов: добавление + миграция при rename (Feature 4)', async () => {
+    await bootFixture(page, FX_VAC()); // projects ["Proj1"], vacancy uses Proj1
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    await page.locator('#s_newproj').fill('Proj2');
+    await page.locator('[data-add="projects"]').click(); await page.waitForTimeout(80);
+    assert((await lsGet(page)).state.projects.includes('Proj2'), 'project added');
+    const inp = page.locator('#s_projects [data-edit]').first(); // Proj1
+    await inp.fill('Proj1X'); await inp.blur(); await page.waitForTimeout(80);
+    const st = (await lsGet(page)).state;
+    assert(st.projects.includes('Proj1X') && !st.projects.includes('Proj1'), 'project renamed');
+    eq(st.people.find(p => p.isVacancy).project, 'Proj1X', 'vacancy project migrated');
+  });
+  await T('TC-17.6', 'P1', 'Ставки исключены из метрик укомплектованности (Feature 1)', async () => {
+    await bootFixture(page, FX_VAC()); // team tA: 1 real grade10 + 1 vacancy grade9
+    const grade = await page.locator('.team[data-team-id="tA"] .metric .mv').first().innerText();
+    assert(grade.trim().startsWith('10'), 'avg grade excludes vacancy (got ' + grade + ')');
+    eq(await page.locator('.team[data-team-id="tA"] .vac-strip').count(), 1, 'vacancy strip shown');
+    // totalHead в аналитике без ставок: 1 человек
+    assert((await page.locator('#anHint').innerText()).includes('1 человек'), 'head excludes vacancy');
   });
 
   await browser.close();
