@@ -157,14 +157,15 @@ const FX_ROUNDTRIP = () => {
   return { state: cp(), snapshots: [{ id: "s1", name: "Base", createdAt: "2026-01-01 00:00", doc: cp() }], baselineId: "s1", uidCounter: 2000 };
 };
 
-// дубли справочников roles/locations (через LS/импорт), которые UI создать не даёт (V4-F1)
+// дубли справочников roles/locations (через LS/импорт), которые UI создать не даёт (V4-F1, V5-F1).
+// Включают whitespace-варианты (" Backend ") — должны схлопнуться после trim+dedup.
 const FX_DUPDICT = {
   state: {
     meta: { name: "DupDict", version: 1 },
-    roles: ["Backend", "Backend", "QA"], locations: ["Москва", "Москва"],
+    roles: ["Backend", " Backend ", "QA", "QA"], locations: ["Москва", " Москва ", "Москва"],
     teams: [{ id: "tA", name: "A", color: "#4f8cff" }],
     people: [
-      { id: "p1", name: "P1", role: "Backend", grade: 9, isContractor: false, location: "Москва", tags: [], allocations: [{ teamId: "tA", fte: 1 }] }
+      { id: "p1", name: "P1", role: " Backend ", grade: 9, isContractor: false, location: " Москва ", tags: [], allocations: [{ teamId: "tA", fte: 1 }] }
     ]
   }, snapshots: [], baselineId: null
 };
@@ -341,20 +342,24 @@ const FX_ROLECOLORS = () => ({
     eq(await count('.team'), 2, 'two team cards');
     eq(curErrors.length, 0, 'no pageerror');
   });
-  await T('TC-2.10', 'P1', 'Дубли roles/locations из LS дедуплицируются (V4-F1)', async () => {
-    await bootFixture(page, FX_DUPDICT); // roles ["Backend","Backend","QA"], locations ["Москва","Москва"]
-    // фильтры строятся из state → не должно быть повторяющихся option
+  await T('TC-2.10', 'P1', 'Дубли roles/locations (вкл. whitespace) дедуплицируются с trim (V4-F1/V5-F1)', async () => {
+    await bootFixture(page, FX_DUPDICT); // roles ["Backend"," Backend ","QA","QA"], locations ["Москва"," Москва ","Москва"]
+    // фильтры строятся из state → не должно быть повторяющихся/whitespace-вариантов option
     const roleOpts = await page.locator('#filterRole option').allInnerTexts();
     eq(new Set(roleOpts).size, roleOpts.length, 'role options unique: ' + roleOpts.join('|'));
-    assert(roleOpts.filter(o => o === 'Backend').length === 1, 'single Backend option');
+    assert(roleOpts.filter(o => o.trim() === 'Backend').length === 1, 'single Backend option');
     const locOpts = await page.locator('#filterLoc option').allInnerTexts();
     eq(new Set(locOpts).size, locOpts.length, 'loc options unique: ' + locOpts.join('|'));
-    // зафиксировать persist (commit) и проверить дедуп в state
+    // зафиксировать persist (commit) и проверить дедуп+trim в state
     await page.locator('#projName').fill('X'); await page.locator('#projName').dispatchEvent('change');
     await page.waitForTimeout(60);
     const st = (await lsGet(page)).state;
-    eq(st.roles.length, 2, 'roles deduped to 2');
-    eq(st.locations.length, 1, 'locations deduped to 1');
+    eq(JSON.stringify(st.roles), JSON.stringify(['Backend', 'QA']), 'roles deduped+trimmed');
+    eq(JSON.stringify(st.locations), JSON.stringify(['Москва']), 'locations deduped+trimmed');
+    // у сотрудника role/location тоже trimmed → совпадают со справочником
+    const p = st.people.find(x => x.name === 'P1');
+    eq(p.role, 'Backend', 'person role trimmed');
+    eq(p.location, 'Москва', 'person location trimmed');
     eq(curErrors.length, 0, 'no pageerror');
   });
   await T('TC-2.7', 'P2', 'Имя кластера переживает reload', async () => {

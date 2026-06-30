@@ -329,8 +329,8 @@ function seed(){
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
 const asStr = (v,def="")=> typeof v==="string" ? v : (v==null ? def : String(v));
-// уникальные непустые строки с сохранением первого вхождения (дубли справочников запрещены, как и в UI)
-const uniqStrings = (arr)=> [...new Set((Array.isArray(arr)?arr:[]).filter(v=>typeof v==="string" && v.trim()!==""))];
+// уникальные непустые строки (trim до дедупа — как UI add/rename; дубли справочников запрещены)
+const uniqStrings = (arr)=> [...new Set((Array.isArray(arr)?arr:[]).filter(v=>typeof v==="string").map(v=>v.trim()).filter(Boolean))];
 
 function normalizeDoc(input){
   const src = (input && typeof input==="object") ? input : {};
@@ -372,8 +372,8 @@ function normalizeDoc(input){
     const allocations = (Array.isArray(p.allocations)?p.allocations:[])
       .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
       .filter(a=> a.fte>0 && validTeam.has(a.teamId));
-    return { id, name: asStr(p.name,"Без имени")||"Без имени", role: asStr(p.role),
-             grade, isContractor, location: asStr(p.location), tags: normTags(p.tags), allocations };
+    return { id, name: asStr(p.name,"Без имени")||"Без имени", role: asStr(p.role).trim(),
+             grade, isContractor, location: asStr(p.location).trim(), tags: normTags(p.tags), allocations };
   }).filter(p=> p.allocations.length>0);   // люди без валидных аллокаций отбрасываются
 
   const meta = (src.meta && typeof src.meta==="object")

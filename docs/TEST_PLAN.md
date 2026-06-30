@@ -101,7 +101,7 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 | Роли в команде | `.role-group`, `.role-h .count`, `[data-addrole]` |
 | Карточка | `.chip[data-person-id][data-team-id]`, `.chip.contractor`, `.grade`, `.name`, `.meta`, `.fte`, `[data-edit]`, классы `.dim .hit .moved-in` |
 | Модалка сотрудника | `#m_name`, `#m_status button[data-st]`, `#m_grade`, `#m_role`, `#m_loc`, `#m_allocs [data-arow]`, `[data-ateam]`, `[data-afte]`, `[data-adel]`, `#m_addalloc`, `#m_allocsum`, `#m_save`, `#m_delete` |
-| Справочники | `#s_roles`, `#s_locations`, `[data-edit] [data-up] [data-down] [data-rm]`, `[data-add]`, `#s_newrole`, `#s_newloc`, `#s_teams`, `[data-tname] [data-tcolor] [data-trm]`, `#s_addteam` |
+| Справочники | `#s_roles` (роли: `[data-rolecolor] [data-roleedit] [data-roleup] [data-roledown] [data-rolerm]`), `#s_locations` (локации: `[data-edit] [data-up] [data-down] [data-rm]`), `[data-add]`, `#s_newrole`, `#s_newloc`, `#s_teams`, `[data-tname] [data-tcolor] [data-trm]`, `#s_addteam` |
 | Снимки | `#snap_name`, `#snap_save`, `.snap-item`, `.snap-item.baseline`, `[data-base] [data-restore] [data-export] [data-delsnap]` |
 | Общее | `.overlay`, `.modal`, `#toastRoot .toast` |
 
@@ -247,7 +247,7 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 ### TS-11. Справочники
 - **TC-11.1 (P0)** Добавить роль (`#s_newrole` + `[data-add="roles"]`). *Ожид.:* роль в списке и
   в `#filterRole`, и доступна в модалке сотрудника.
-- **TC-11.2 (P1)** Переименование роли инлайн (`[data-edit]`).
+- **TC-11.2 (P1)** Переименование роли инлайн (`[data-roleedit]`; локации — `[data-edit]`).
 - **TC-11.3 (P1)** Перемещение роли ↑/↓ меняет порядок групп на доске.
 - **TC-11.4 (P1)** Удаление роли из справочника не меняет роль у существующих людей.
 - **TC-11.5 (P1)** Добавить/переименовать/удалить локацию — аналогично.
@@ -304,7 +304,8 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 - **TC-15.4 (P1)** Квадрат грейда окрашен по роли — у разных ролей разные цвета (палитра по
   индексу, когда явный цвет не задан).
 - **TC-15.5 (P1)** Цвет роли из справочника (`[data-rolecolor]`) применяется к квадрату грейда
-  и сохраняется в `state.roleColors` (на `change`; `input` — живой предпросмотр без истории).
+  и сохраняется в `state.roleColors` **только на `change`**; промежуточные `input` не мутируют
+  `state` (change-only, см. TC-16.7).
 
 ### TS-16. Жизненный цикл справочника ролей (ревью v3) + лимиты тегов
 - **TC-16.1 (P1)** Rename роли с явным цветом: мигрирует `people[].role` на новое имя, переносит
