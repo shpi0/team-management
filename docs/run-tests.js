@@ -157,6 +157,19 @@ const FX_ROUNDTRIP = () => {
   return { state: cp(), snapshots: [{ id: "s1", name: "Base", createdAt: "2026-01-01 00:00", doc: cp() }], baselineId: "s1", uidCounter: 2000 };
 };
 
+// фикстура с явными цветами ролей — для lifecycle-тестов справочника ролей
+const FX_ROLECOLORS = () => ({
+  state: {
+    meta: { name: "RC", version: 1 }, roles: ["Backend", "QA"],
+    roleColors: { Backend: "#ff0000", QA: "#00ff00" }, locations: ["М"],
+    teams: [{ id: "tA", name: "A", color: "#4f8cff" }],
+    people: [
+      { id: "p1", name: "B1", role: "Backend", grade: 10, isContractor: false, location: "М", tags: [], allocations: [{ teamId: "tA", fte: 1 }] },
+      { id: "p2", name: "Q1", role: "QA", grade: 8, isContractor: false, location: "М", tags: [], allocations: [{ teamId: "tA", fte: 1 }] }
+    ]
+  }, snapshots: [], baselineId: null, uidCounter: 3000
+});
+
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext();
@@ -1055,20 +1068,28 @@ const FX_ROUNDTRIP = () => {
     const chip2 = page.locator('.chip', { has: page.locator('.name', { hasText: 'Алексей Орлов' }) }).first();
     assert((await chip2.locator('.tag-pill').allInnerTexts()).includes('Mentor'), 'new tag rendered');
   });
-  await T('TC-15.3', 'P1', 'Перетаскивание команд меняет порядок на доске', async () => {
+  await T('TC-15.3', 'P1', 'Перестановка команд: порядок + undo + redo + reload (F3)', async () => {
     await bootFixture(page, FX()); // teams: tA, tB
     eq(await page.locator('.team').first().getAttribute('data-team-id'), 'tA', 'tA first initially');
-    // тащим tB на tA → tB встаёт перед tA
-    await page.evaluate(() => {
+    const reorder = () => page.evaluate(() => {
       const src = document.querySelector('.team[data-team-id="tB"] [data-teamdrag]');
       const tgt = document.querySelector('.team[data-team-id="tA"]');
       const dt = new DataTransfer();
       const f = (el, ty) => el.dispatchEvent(new DragEvent(ty, { bubbles: true, cancelable: true, dataTransfer: dt }));
       f(src, 'dragstart'); f(tgt, 'dragover'); f(tgt, 'drop'); f(src, 'dragend');
     });
-    await page.waitForTimeout(80);
+    await reorder(); await page.waitForTimeout(80);
     eq(await page.locator('.team').first().getAttribute('data-team-id'), 'tB', 'tB first after reorder');
     eq((await lsGet(page)).state.teams[0].id, 'tB', 'order persisted in LS');
+    // undo → исходный порядок
+    await page.locator('#undo').click(); await page.waitForTimeout(80);
+    eq(await page.locator('.team').first().getAttribute('data-team-id'), 'tA', 'tA first after undo');
+    // redo → снова новый порядок
+    await page.locator('#redo').click(); await page.waitForTimeout(80);
+    eq(await page.locator('.team').first().getAttribute('data-team-id'), 'tB', 'tB first after redo');
+    // reload → порядок сохранён
+    await page.reload(); await page.waitForTimeout(80);
+    eq(await page.locator('.team').first().getAttribute('data-team-id'), 'tB', 'tB first after reload');
   });
   await T('TC-15.4', 'P1', 'Квадрат грейда окрашен по роли (разные роли — разные цвета)', async () => {
     await bootFixture(page, FX()); // Backend (idx0) и QA (idx1) без явных roleColors → палитра
@@ -1081,15 +1102,83 @@ const FX_ROUNDTRIP = () => {
   await T('TC-15.5', 'P1', 'Цвет роли настраивается в справочнике и применяется к квадрату', async () => {
     await bootFixture(page, FX());
     await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
-    // первый цвет-пикер роли (Backend) → задаём #ff0000
+    // первый цвет-пикер роли (Backend): input — live-preview, change — фиксация (F6)
     const picker = page.locator('#s_roles [data-rolecolor]').first();
-    await picker.evaluate(el => { el.value = '#ff0000'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await picker.evaluate(el => { el.value = '#ff0000';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true })); });
     await page.waitForTimeout(60);
     await page.keyboard.press('Escape');
     const be = await page.locator('.chip', { has: page.locator('.name', { hasText: 'S10' }) }).first().locator('.grade')
       .evaluate(el => getComputedStyle(el).backgroundColor);
     eq(be, 'rgb(255, 0, 0)', 'Backend grade square is red');
-    assert((await lsGet(page)).state.roleColors.Backend === '#ff0000', 'roleColors persisted');
+    assert((await lsGet(page)).state.roleColors.Backend === '#ff0000', 'roleColors persisted on change');
+  });
+
+  // ============ TS-16 lifecycle справочника ролей (ревью v3) + лимиты тегов ============
+  await T('TC-16.1', 'P1', 'Rename роли мигрирует сотрудников и сохраняет цвет (F1)', async () => {
+    await bootFixture(page, FX_ROLECOLORS()); // Backend=#ff0000
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    const inp = page.locator('#s_roles [data-roleedit]').first(); // Backend
+    await inp.fill('BackendX'); await inp.blur(); await page.waitForTimeout(80);
+    const st = (await lsGet(page)).state;
+    assert(st.roles.includes('BackendX') && !st.roles.includes('Backend'), 'role renamed in dictionary');
+    eq(st.people.find(p => p.name === 'B1').role, 'BackendX', 'person migrated to new role');
+    eq(st.roleColors.BackendX, '#ff0000', 'color moved to new name');
+    assert(st.roleColors.Backend === undefined, 'old color key removed');
+    await page.keyboard.press('Escape');
+    const be = await page.locator('.chip', { has: page.locator('.name', { hasText: 'B1' }) }).first().locator('.grade')
+      .evaluate(el => getComputedStyle(el).backgroundColor);
+    eq(be, 'rgb(255, 0, 0)', 'employee keeps explicit color after rename');
+  });
+  await T('TC-16.2', 'P1', 'Rename роли в существующее имя запрещён (F2)', async () => {
+    await bootFixture(page, FX_ROLECOLORS()); // roles: Backend, QA
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    const inp = page.locator('#s_roles [data-roleedit]').first(); // Backend
+    await inp.fill('QA'); await inp.blur(); await page.waitForTimeout(80);
+    assert((await page.locator('#toastRoot .toast').innerText()).includes('уже существует'), 'reject toast');
+    const roles = (await lsGet(page)).state.roles;
+    eq(roles.length, 2, 'no duplicate added');
+    eq(new Set(roles).size, 2, 'roles stay unique');
+    assert(roles.includes('Backend') && roles.includes('QA'), 'both roles intact');
+  });
+  await T('TC-16.3', 'P1', 'Delete роли удаляет только её цвет (F4)', async () => {
+    await bootFixture(page, FX_ROLECOLORS());
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    await page.locator('#s_roles [data-rolerm]').first().click(); await page.waitForTimeout(80); // delete Backend
+    const rc = (await lsGet(page)).state.roleColors;
+    assert(rc.Backend === undefined, 'Backend color removed');
+    eq(rc.QA, '#00ff00', 'QA color preserved');
+  });
+  await T('TC-16.4', 'P1', 'Move роли меняет fallback-цвет согласно индексу (F4)', async () => {
+    await bootFixture(page, FX()); // roles: Backend(0), QA(1), без явных цветов
+    const colorOf = (nm) => page.locator('.chip', { has: page.locator('.name', { hasText: nm }) }).first()
+      .locator('.grade').evaluate(el => getComputedStyle(el).backgroundColor);
+    const beBefore = await colorOf('S10');
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    await page.locator('#s_roles [data-roledown]').first().click(); await page.waitForTimeout(80); // Backend down → index 1
+    await page.keyboard.press('Escape');
+    const beAfter = await colorOf('S10');
+    assert(beBefore !== beAfter, 'Backend fallback color changed after move (' + beBefore + ' → ' + beAfter + ')');
+  });
+  await T('TC-16.5', 'P2', 'Неизвестная роль у сотрудника: квадрат окрашен, без ошибок (F4)', async () => {
+    const fx = FX(); fx.state.people[0].role = 'GhostRole'; // нет в roles
+    await bootFixture(page, fx);
+    const bg = await page.locator('.chip', { has: page.locator('.name', { hasText: 'S10' }) }).first().locator('.grade')
+      .evaluate(el => getComputedStyle(el).backgroundColor);
+    assert(bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent', 'unknown role still colored: ' + bg);
+    eq(curErrors.length, 0, 'no pageerror');
+  });
+  await T('TC-16.6', 'P2', 'Лимиты тегов: длина и количество ограничены (F7)', async () => {
+    await bootDemo(page);
+    const chip = page.locator('.chip', { has: page.locator('.name', { hasText: 'Анна Лис' }) }).first();
+    await chip.locator('[data-edit]').click({ force: true });
+    const many = Array.from({ length: 15 }, (_, i) => 'T' + i).join(',') + ',' + 'x'.repeat(50);
+    await page.locator('#m_tags').fill(many);
+    await page.locator('#m_save').click(); await page.waitForTimeout(80);
+    const p = (await lsGet(page)).state.people.find(x => x.name === 'Анна Лис');
+    assert(p.tags.length <= 12, 'tag count capped at 12 (got ' + p.tags.length + ')');
+    assert(p.tags.every(t => t.length <= 24), 'each tag <= 24 chars');
   });
 
   await browser.close();

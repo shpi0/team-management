@@ -120,7 +120,7 @@
   .chip .grade.masked{font-size:13px;letter-spacing:1px}
   .chip .tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
   .tag-pill{font-size:10px;font-weight:600;line-height:1.3;background:#0e1626;border:1px solid var(--line);
-    border-radius:5px;padding:0 5px;color:#bcd0ff;white-space:nowrap}
+    border-radius:5px;padding:0 5px;color:#bcd0ff;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
   .chip .fte{font-size:10px;font-weight:700;background:#0e1626;border:1px solid var(--line);
     border-radius:5px;padding:1px 5px;color:var(--accent2)}
   .chip .edit{opacity:0;transition:.1s;color:var(--muted);background:none;border:0;padding:2px 4px}
@@ -253,6 +253,14 @@ const LS_KEY = "team-balancer-v1";
 const GRADE_MIN = 7, GRADE_MAX = 12;
 // Пороги выброса по модулю z-оценки (сравнение команд между собой)
 const Z_WARN = 0.85, Z_BAD = 1.6;
+// Лимиты тегов (защита плотности доски)
+const MAX_TAG_LEN = 24, MAX_TAGS = 12;
+const normTags = (arr)=> (Array.isArray(arr)?arr:[])
+  .filter(t=>typeof t==="string")
+  .map(t=>t.trim().slice(0,MAX_TAG_LEN))
+  .filter(Boolean)
+  .filter((t,i,a)=>a.indexOf(t)===i)
+  .slice(0,MAX_TAGS);
 
 /* ---------- state ---------- */
 let state = null;          // {meta, roles, locations, teams, people}
@@ -362,11 +370,8 @@ function normalizeDoc(input){
     const allocations = (Array.isArray(p.allocations)?p.allocations:[])
       .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
       .filter(a=> a.fte>0 && validTeam.has(a.teamId));
-    const tags = Array.isArray(p.tags)
-      ? [...new Set(p.tags.filter(t=>typeof t==="string" && t.trim()).map(t=>t.trim()))]
-      : [];
     return { id, name: asStr(p.name,"Без имени")||"Без имени", role: asStr(p.role),
-             grade, isContractor, location: asStr(p.location), tags, allocations };
+             grade, isContractor, location: asStr(p.location), tags: normTags(p.tags), allocations };
   }).filter(p=> p.allocations.length>0);   // люди без валидных аллокаций отбрасываются
 
   const meta = (src.meta && typeof src.meta==="object")
@@ -783,7 +788,7 @@ function personModal(person, defaultTeamId, defaultRole){
         <div class="field"><label>Роль</label><select id="m_role">${roleOpts}</select></div>
         <div class="field"><label>Локация</label><select id="m_loc">${locOpts}</select></div>
       </div>
-      <div class="field"><label>Теги — уникальные навыки (через запятую)</label>
+      <div class="field"><label>Теги — уникальные навыки (через запятую; до ${MAX_TAGS} шт., по ${MAX_TAG_LEN} симв.)</label>
         <input id="m_tags" value="${esc((p.tags||[]).join(', '))}" placeholder="напр. Kafka, Tech Lead"></div>
       <div class="field"><label>Аллокации по командам (доли FTE)</label>
         <div class="listmgr" id="m_allocs">${allocRows(p.allocations)}</div>
@@ -830,7 +835,7 @@ function personModal(person, defaultTeamId, defaultRole){
   $("#m_save").onclick=()=>{
     p.name=$("#m_name").value.trim()||"Без имени";
     p.role=$("#m_role").value; p.location=$("#m_loc").value;
-    p.tags=[...new Set($("#m_tags").value.split(",").map(s=>s.trim()).filter(Boolean))];
+    p.tags=normTags($("#m_tags").value.split(","));
     p.grade = p.isContractor ? null : clampGrade($("#m_grade").value);
     p.allocations = $$("#m_allocs [data-arow]").map(r=>({
       teamId:$("[data-ateam]",r).value, fte:Math.max(0,parseFloat($("[data-afte]",r).value)||0)
@@ -884,7 +889,7 @@ function settingsModal(){
             <button class="btn sm ghost" data-trm="${t.id}" style="color:var(--bad)">✕</button></div>`).join("")}
         </div>
         <button class="btn sm" id="s_addteam" style="align-self:flex-start;margin-top:6px">＋ команда</button></div>
-      <span class="hint">Изменения справочников применяются сразу. Цвет роли красит квадрат грейда на доске. Удаление/переименование роли/локации не трогает сотрудников — у них останется прежнее значение.</span>
+      <span class="hint">Изменения применяются сразу. Цвет роли красит квадрат грейда на доске. Переименование роли/локации мигрирует сотрудников и переносит цвет роли (дубли запрещены); удаление не трогает сотрудников — у них останется прежнее значение.</span>
     </div>
     <div class="foot"><button class="btn primary" onclick="closeModal()">Готово</button></div></div>`);
 
@@ -896,20 +901,29 @@ function settingsModal(){
     const v=inp.value.trim(); if(!v) return;
     if(!state[key].includes(v)) state[key].push(v); commit(); rebind();
   });
-  // edit inline locations (роли — отдельными обработчиками ниже)
+  // edit inline locations: настоящее переименование (миграция сотрудников) + запрет дублей
   $$("[data-edit]").forEach(inp=>inp.onchange=()=>{
-    const [key,i]=inp.dataset.edit.split(":"); state[key][+i]=inp.value.trim()||state[key][+i]; commit();
+    const [key,i]=inp.dataset.edit.split(":"); const idx=+i; const old=state[key][idx]; const nv=inp.value.trim();
+    if(!nv || nv===old){ inp.value=old; return; }
+    if(state[key].some((v,j)=>j!==idx && v===nv)){ toast(`«${nv}» уже есть в справочнике`); inp.value=old; return; }
+    state[key][idx]=nv;
+    if(key==="locations"){ for(const p of state.people){ if(p.location===old) p.location=nv; } }
+    commit();
   });
-  // roles: цвет, переименование (с переносом цвета), порядок, удаление
-  $$("[data-rolecolor]").forEach(inp=>inp.oninput=()=>{
-    const r=state.roles[+inp.dataset.rolecolor]; state.roleColors=state.roleColors||{};
-    state.roleColors[r]=inp.value; commit(); });
+  // roles: цвет (live-preview на input, одна undo-точка на change), переименование, порядок, удаление
+  $$("[data-rolecolor]").forEach(inp=>{
+    const apply=()=>{ const r=state.roles[+inp.dataset.rolecolor]; state.roleColors=state.roleColors||{}; state.roleColors[r]=inp.value; };
+    inp.oninput =()=>{ apply(); render(); };   // живой предпросмотр без записи в историю
+    inp.onchange=()=>{ apply(); commit(); };   // завершение выбора → единая undo-точка
+  });
   $$("[data-roleedit]").forEach(inp=>inp.onchange=()=>{
-    const i=+inp.dataset.roleedit, old=state.roles[i], nv=inp.value.trim()||old;
-    if(nv!==old){
-      if(state.roleColors && state.roleColors[old]!=null){ state.roleColors[nv]=state.roleColors[old]; delete state.roleColors[old]; }
-      state.roles[i]=nv;
-    }
+    const i=+inp.dataset.roleedit, old=state.roles[i], nv=inp.value.trim();
+    if(!nv || nv===old){ inp.value=old; return; }
+    if(state.roles.some((r,j)=>j!==i && r===nv)){ toast(`Роль «${nv}» уже существует`); inp.value=old; return; }
+    // настоящее переименование: переносим цвет И мигрируем сотрудников
+    if(state.roleColors && state.roleColors[old]!=null){ state.roleColors[nv]=state.roleColors[old]; delete state.roleColors[old]; }
+    for(const p of state.people){ if(p.role===old) p.role=nv; }
+    state.roles[i]=nv;
     commit(); rebind(); });
   $$("[data-roleup]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roleup; if(a>0){ [state.roles[a-1],state.roles[a]]=[state.roles[a],state.roles[a-1]]; commit(); rebind(); } });
   $$("[data-roledown]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roledown; if(a<state.roles.length-1){ [state.roles[a+1],state.roles[a]]=[state.roles[a],state.roles[a+1]]; commit(); rebind(); } });
