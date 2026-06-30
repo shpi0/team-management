@@ -329,11 +329,13 @@ function seed(){
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
 const asStr = (v,def="")=> typeof v==="string" ? v : (v==null ? def : String(v));
+// уникальные непустые строки с сохранением первого вхождения (дубли справочников запрещены, как и в UI)
+const uniqStrings = (arr)=> [...new Set((Array.isArray(arr)?arr:[]).filter(v=>typeof v==="string" && v.trim()!==""))];
 
 function normalizeDoc(input){
   const src = (input && typeof input==="object") ? input : {};
-  const roles     = Array.isArray(src.roles)     ? src.roles.filter(r=>typeof r==="string")     : [];
-  const locations = Array.isArray(src.locations) ? src.locations.filter(r=>typeof r==="string") : [];
+  const roles     = uniqStrings(src.roles);
+  const locations = uniqStrings(src.locations);
   // цвета ролей: только валидные hex6
   const roleColors = {};
   if(src.roleColors && typeof src.roleColors==="object"){
@@ -910,11 +912,10 @@ function settingsModal(){
     if(key==="locations"){ for(const p of state.people){ if(p.location===old) p.location=nv; } }
     commit();
   });
-  // roles: цвет (live-preview на input, одна undo-точка на change), переименование, порядок, удаление
-  $$("[data-rolecolor]").forEach(inp=>{
-    const apply=()=>{ const r=state.roles[+inp.dataset.rolecolor]; state.roleColors=state.roleColors||{}; state.roleColors[r]=inp.value; };
-    inp.oninput =()=>{ apply(); render(); };   // живой предпросмотр без записи в историю
-    inp.onchange=()=>{ apply(); commit(); };   // завершение выбора → единая undo-точка
+  // roles: цвет применяется только на change (единая undo-точка; промежуточные input не мутируют state)
+  $$("[data-rolecolor]").forEach(inp=>inp.onchange=()=>{
+    const r=state.roles[+inp.dataset.rolecolor]; state.roleColors=state.roleColors||{};
+    state.roleColors[r]=inp.value; commit();
   });
   $$("[data-roleedit]").forEach(inp=>inp.onchange=()=>{
     const i=+inp.dataset.roleedit, old=state.roles[i], nv=inp.value.trim();

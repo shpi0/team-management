@@ -157,6 +157,18 @@ const FX_ROUNDTRIP = () => {
   return { state: cp(), snapshots: [{ id: "s1", name: "Base", createdAt: "2026-01-01 00:00", doc: cp() }], baselineId: "s1", uidCounter: 2000 };
 };
 
+// дубли справочников roles/locations (через LS/импорт), которые UI создать не даёт (V4-F1)
+const FX_DUPDICT = {
+  state: {
+    meta: { name: "DupDict", version: 1 },
+    roles: ["Backend", "Backend", "QA"], locations: ["Москва", "Москва"],
+    teams: [{ id: "tA", name: "A", color: "#4f8cff" }],
+    people: [
+      { id: "p1", name: "P1", role: "Backend", grade: 9, isContractor: false, location: "Москва", tags: [], allocations: [{ teamId: "tA", fte: 1 }] }
+    ]
+  }, snapshots: [], baselineId: null
+};
+
 // фикстура с явными цветами ролей — для lifecycle-тестов справочника ролей
 const FX_ROLECOLORS = () => ({
   state: {
@@ -327,6 +339,22 @@ const FX_ROLECOLORS = () => ({
     eq(new Set(snapIds).size, snapIds.length, 'snapshot ids unique');
     // на доске два разных data-team-id
     eq(await count('.team'), 2, 'two team cards');
+    eq(curErrors.length, 0, 'no pageerror');
+  });
+  await T('TC-2.10', 'P1', 'Дубли roles/locations из LS дедуплицируются (V4-F1)', async () => {
+    await bootFixture(page, FX_DUPDICT); // roles ["Backend","Backend","QA"], locations ["Москва","Москва"]
+    // фильтры строятся из state → не должно быть повторяющихся option
+    const roleOpts = await page.locator('#filterRole option').allInnerTexts();
+    eq(new Set(roleOpts).size, roleOpts.length, 'role options unique: ' + roleOpts.join('|'));
+    assert(roleOpts.filter(o => o === 'Backend').length === 1, 'single Backend option');
+    const locOpts = await page.locator('#filterLoc option').allInnerTexts();
+    eq(new Set(locOpts).size, locOpts.length, 'loc options unique: ' + locOpts.join('|'));
+    // зафиксировать persist (commit) и проверить дедуп в state
+    await page.locator('#projName').fill('X'); await page.locator('#projName').dispatchEvent('change');
+    await page.waitForTimeout(60);
+    const st = (await lsGet(page)).state;
+    eq(st.roles.length, 2, 'roles deduped to 2');
+    eq(st.locations.length, 1, 'locations deduped to 1');
     eq(curErrors.length, 0, 'no pageerror');
   });
   await T('TC-2.7', 'P2', 'Имя кластера переживает reload', async () => {
@@ -1179,6 +1207,46 @@ const FX_ROLECOLORS = () => ({
     const p = (await lsGet(page)).state.people.find(x => x.name === 'Анна Лис');
     assert(p.tags.length <= 12, 'tag count capped at 12 (got ' + p.tags.length + ')');
     assert(p.tags.every(t => t.length <= 24), 'each tag <= 24 chars');
+  });
+  await T('TC-16.7', 'P2', 'Color picker: input-only НЕ мутирует state (V4-F2, change-only)', async () => {
+    await bootFixture(page, FX()); // Backend без явного цвета → fallback
+    const colorOf = () => page.locator('.chip', { has: page.locator('.name', { hasText: 'S10' }) }).first()
+      .locator('.grade').evaluate(el => getComputedStyle(el).backgroundColor);
+    const before = await colorOf();
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    // только input, без change
+    await page.locator('#s_roles [data-rolecolor]').first()
+      .evaluate(el => { el.value = '#ff0000'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.waitForTimeout(60);
+    await page.keyboard.press('Escape');
+    eq(await colorOf(), before, 'board color unchanged after input-only');
+    // зафиксировать persist и убедиться, что roleColors.Backend не появился
+    await page.locator('#projName').fill('Z'); await page.locator('#projName').dispatchEvent('change');
+    await page.waitForTimeout(60);
+    assert(((await lsGet(page)).state.roleColors || {}).Backend === undefined, 'state not mutated by input-only');
+  });
+  await T('TC-16.8', 'P1', 'Rename локации мигрирует сотрудников и undo-обратим (V4-F3)', async () => {
+    await bootFixture(page, FX()); // locations: Москва, Минск; S10/S8 — Москва, Contr — Минск
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    const inp = page.locator('#s_locations [data-edit]').first(); // Москва
+    await inp.fill('Москва-2'); await inp.blur(); await page.waitForTimeout(80);
+    let st = (await lsGet(page)).state;
+    assert(st.locations.includes('Москва-2') && !st.locations.includes('Москва'), 'location renamed');
+    eq(st.people.filter(p => p.location === 'Москва').length, 0, 'no one on old location');
+    assert(st.people.some(p => p.location === 'Москва-2'), 'people migrated to new location');
+    await page.keyboard.press('Escape'); // закрыть модалку, чтобы undo не блокировался оверлеем
+    await page.locator('#undo').click(); await page.waitForTimeout(80);
+    st = (await lsGet(page)).state;
+    assert(st.locations.includes('Москва') && !st.locations.includes('Москва-2'), 'undo restores location');
+    assert(st.people.some(p => p.location === 'Москва'), 'undo restores people location');
+  });
+  await T('TC-16.9', 'P1', 'Rename локации в существующее имя отклоняется (V4-F3)', async () => {
+    await bootFixture(page, FX()); // Москва, Минск
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    const inp = page.locator('#s_locations [data-edit]').first(); // Москва
+    await inp.fill('Минск'); await inp.blur(); await page.waitForTimeout(80);
+    assert((await page.locator('#toastRoot .toast').innerText()).includes('уже есть'), 'reject toast');
+    eq(await page.locator('#s_locations [data-edit]').first().inputValue(), 'Москва', 'reverted to old value');
   });
 
   await browser.close();
