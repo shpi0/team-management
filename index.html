@@ -121,7 +121,6 @@
   .chip.dim{opacity:.25;filter:grayscale(.6)}
   .chip.hit{box-shadow:0 0 0 2px var(--warn)}
   .chip.moved-in{box-shadow:0 0 0 2px var(--good)}
-  .chip.moved-out{border-style:dashed;border-color:var(--bad);opacity:.7}
 
   .badge{font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px}
   .badge.contr{background:rgba(168,85,247,.18);color:#d6b4ff;border:1px solid rgba(168,85,247,.5)}
@@ -293,6 +292,63 @@ function seed(){
 }
 
 /* ============================================================ *
+ *  Validation / normalization
+ *  Импорт и localStorage считаются недоверенным входом: приводим
+ *  документ к безопасной форме, чинибельные значения — чиним,
+ *  невалидные аллокации/людей — отбрасываем.
+ * ============================================================ */
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+const asStr = (v,def="")=> typeof v==="string" ? v : (v==null ? def : String(v));
+
+function normalizeDoc(input){
+  const src = (input && typeof input==="object") ? input : {};
+  const roles     = Array.isArray(src.roles)     ? src.roles.filter(r=>typeof r==="string")     : [];
+  const locations = Array.isArray(src.locations) ? src.locations.filter(r=>typeof r==="string") : [];
+
+  // команды: безопасный id (иначе регенерация + ремап аллокаций), валидный цвет
+  const idMap = new Map();
+  const teams = (Array.isArray(src.teams)?src.teams:[]).map(t=>{
+    t = t||{};
+    let id = asStr(t.id);
+    if(!SAFE_ID.test(id)){ const nid=uid("t"); if(id) idMap.set(id,nid); id=nid; }
+    return { id, name: asStr(t.name,"Команда")||"Команда",
+             color: HEX6.test(asStr(t.color)) ? t.color : "#4f8cff" };
+  });
+  const validTeam = new Set(teams.map(t=>t.id));
+  const remap = id => idMap.has(id) ? idMap.get(id) : id;
+
+  // люди: грейд клампится, у подрядчиков null; аллокации только на существующие команды с fte>0
+  const people = (Array.isArray(src.people)?src.people:[]).map(p=>{
+    p = p||{};
+    let id = asStr(p.id); if(!SAFE_ID.test(id)) id = uid("p");
+    const isContractor = !!p.isContractor;
+    let grade = null;
+    if(!isContractor){ const n=parseInt(p.grade,10); grade = isNaN(n)?GRADE_MIN:Math.min(GRADE_MAX,Math.max(GRADE_MIN,n)); }
+    const allocations = (Array.isArray(p.allocations)?p.allocations:[])
+      .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
+      .filter(a=> a.fte>0 && validTeam.has(a.teamId));
+    return { id, name: asStr(p.name,"Без имени")||"Без имени", role: asStr(p.role),
+             grade, isContractor, location: asStr(p.location), allocations };
+  }).filter(p=> p.allocations.length>0);   // люди без валидных аллокаций отбрасываются
+
+  const meta = (src.meta && typeof src.meta==="object")
+    ? { name: asStr(src.meta.name,"Кластер")||"Кластер", version:1 }
+    : { name:"Кластер", version:1 };
+  return { meta, roles, locations, teams, people };
+}
+
+function normalizeSnapshots(arr){
+  if(!Array.isArray(arr)) return [];
+  return arr.map(s=>{
+    s = s||{};
+    let id = asStr(s.id); if(!SAFE_ID.test(id)) id = uid("s");
+    return { id, name: asStr(s.name,"Снимок")||"Снимок", createdAt: asStr(s.createdAt),
+             doc: normalizeDoc(s.doc) };
+  });
+}
+
+/* ============================================================ *
  *  Persistence
  * ============================================================ */
 function persist(){
@@ -304,8 +360,11 @@ function load(){
   try{
     const raw = localStorage.getItem(LS_KEY);
     if(raw){ const d=JSON.parse(raw);
-      state=d.state; snapshots=d.snapshots||[]; baselineId=d.baselineId||null;
-      uidCounter=d.uidCounter||1; return; }
+      uidCounter = d.uidCounter||1;
+      state = normalizeDoc(d.state);
+      snapshots = normalizeSnapshots(d.snapshots);
+      baselineId = snapshots.some(s=>s.id===d.baselineId) ? d.baselineId : null;
+      return; }
   }catch(e){}
   state = seed();
 }
@@ -339,7 +398,7 @@ function teamMetrics(teamId, doc=state){
     }
   }
   return {
-    fte, head,
+    fte, head, gradeFte,
     avgGrade: gradeFte>0 ? gradeW/gradeFte : null,
     contrShare: fte>0 ? contrFte/fte : 0,
     locs
@@ -430,7 +489,7 @@ function fillSelect(sel, items, val, allLabel){
 }
 
 function renderAnalytics(stats){
-  const avgAll = (()=>{ let w=0,f=0; for(const x of stats.per){ if(x.m.avgGrade!=null){w+=x.m.avgGrade*x.m.fte;f+=x.m.fte;} } return f?w/f:null; })();
+  const avgAll = (()=>{ let w=0,f=0; for(const x of stats.per){ if(x.m.avgGrade!=null){w+=x.m.avgGrade*x.m.gradeFte;f+=x.m.gradeFte;} } return f?w/f:null; })();
   const contrPct = stats.totalFte? Math.round(stats.per.reduce((s,x)=>s+x.m.contrShare*x.m.fte,0)/stats.totalFte*100):0;
   // локации по кластеру
   const locAgg={};
@@ -613,10 +672,10 @@ function closeModal(){ $("#modalRoot").innerHTML=""; }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
 
 /* ----- person editor ----- */
-function personModal(person, defaultTeamId){
+function personModal(person, defaultTeamId, defaultRole){
   const isNew=!person;
   const p = person ? clone(person) : {
-    id:uid("p"), name:"", role:state.roles[0]||"", grade:9, isContractor:false,
+    id:uid("p"), name:"", role:defaultRole||state.roles[0]||"", grade:9, isContractor:false,
     location:state.locations[0]||"", allocations: defaultTeamId?[{teamId:defaultTeamId,fte:1}]:[]
   };
   const roleOpts=state.roles.map(r=>`<option ${r===p.role?"selected":""}>${esc(r)}</option>`).join("");
@@ -662,7 +721,9 @@ function personModal(person, defaultTeamId){
     </div></div>`);
 
   const upSum=()=>{ const sum=$$("#m_allocs [data-afte]").reduce((s,i)=>s+(parseFloat(i.value)||0),0);
-    $("#m_allocsum").textContent=`Суммарный FTE: ${sum.toFixed(2)}`; };
+    const el=$("#m_allocsum"); const over=sum>1.0001;
+    el.textContent=`Суммарный FTE: ${sum.toFixed(2)}` + (over?" ⚠ больше 1.0 (перегрузка)":"");
+    el.style.color = over ? "var(--warn)" : "var(--muted)"; };
   upSum();
 
   // status toggle
@@ -828,10 +889,20 @@ function importFile(file){
   r.onload=()=>{
     try{
       const d=JSON.parse(r.result);
-      if(d.state && d.state.teams){ state=d.state; snapshots=d.snapshots||[]; baselineId=d.baselineId||null; }
-      else if(d.teams && d.people){ state=d; } // допускаем «голый» документ
+      let doc, snaps=[], base=null;
+      if(d && typeof d==="object" && d.state){ doc=d.state; snaps=d.snapshots; base=d.baselineId; }
+      else if(d && typeof d==="object" && (d.teams||d.people)){ doc=d; } // «голый» документ
       else throw 0;
-      history=[]; hpos=-1; pushHistory(); persist(); render(); toast("Данные загружены");
+      // подсчёт отброшенного для сводки пользователю
+      const rawPeople = Array.isArray(doc.people)?doc.people.length:0;
+      state = normalizeDoc(doc);
+      snapshots = normalizeSnapshots(snaps);
+      baselineId = snapshots.some(s=>s.id===base) ? base : null;
+      ui.compare=false;
+      history=[]; hpos=-1; pushHistory(); persist(); render();
+      const dropped = rawPeople - state.people.length;
+      toast(`Данные загружены: ${state.teams.length} команд, ${state.people.length} чел.` +
+            (dropped>0 ? ` (отброшено записей: ${dropped})` : ""));
     }catch(e){ toast("Не удалось прочитать файл"); }
   };
   r.readAsText(file);
@@ -922,10 +993,7 @@ $("#board").addEventListener("change",e=>{
   if(rn){ const t=state.teams.find(x=>x.id===e.target.closest(".team").dataset.teamId);
     t.name=rn.value.trim()||t.name; commit(); }
 });
-function quickAdd(teamId, role){
-  personModal({id:uid("p"),name:"",role,grade:9,isContractor:false,
-    location:state.locations[0]||"",allocations:[{teamId,fte:1}]});
-}
+function quickAdd(teamId, role){ personModal(null, teamId, role); }
 
 document.addEventListener("keydown",e=>{
   if(e.target.matches("input,select,textarea")) return;

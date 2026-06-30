@@ -99,7 +99,7 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 | Аналитика | `#analytics #analyticsBody #anHint`, карточки `.stat`, бары `.barrow` |
 | Команда | `.team[data-team-id]`, `[data-rename]`, `[data-delteam]`, `.metric .mv`, `.flagdot`, `[data-addhere]`, `.diff-strip`, `.delta.up/.down` |
 | Роли в команде | `.role-group`, `.role-h .count`, `[data-addrole]` |
-| Карточка | `.chip[data-person-id][data-team-id]`, `.chip.contractor`, `.grade`, `.name`, `.meta`, `.fte`, `[data-edit]`, классы `.dim .hit .moved-in .moved-out` |
+| Карточка | `.chip[data-person-id][data-team-id]`, `.chip.contractor`, `.grade`, `.name`, `.meta`, `.fte`, `[data-edit]`, классы `.dim .hit .moved-in` |
 | Модалка сотрудника | `#m_name`, `#m_status button[data-st]`, `#m_grade`, `#m_role`, `#m_loc`, `#m_allocs [data-arow]`, `[data-ateam]`, `[data-afte]`, `[data-adel]`, `#m_addalloc`, `#m_allocsum`, `#m_save`, `#m_delete` |
 | Справочники | `#s_roles`, `#s_locations`, `[data-edit] [data-up] [data-down] [data-rm]`, `[data-add]`, `#s_newrole`, `#s_newloc`, `#s_teams`, `[data-tname] [data-tcolor] [data-trm]`, `#s_addteam` |
 | Снимки | `#snap_name`, `#snap_save`, `.snap-item`, `.snap-item.baseline`, `[data-base] [data-restore] [data-export] [data-delsnap]` |
@@ -136,6 +136,12 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 - **TC-2.5 (P1)** Импорт «голого» документа (`{teams,people,…}` без обёртки). *Ожид.:* принят.
 - **TC-2.6 (P1)** Импорт битого JSON. *Ожид.:* тост «Не удалось прочитать файл», состояние
   не разрушено.
+- **TC-2.8 (P1)** Импорт структурно некорректного документа (валидный JSON, кривая схема).
+  *Шаги:* импортировать `FX_BADSCHEMA`. *Ожид.:* `normalizeDoc` чинит — справочники существуют;
+  небезопасный `id` команды перегенерён; битый `color` → дефолт; `grade` клампится; подрядчик
+  получает `grade=null`; `fte`-строка парсится; люди с аллокацией на несуществующую команду /
+  `fte=0` / `allocations` не-массив отброшены; `baselineId` на несуществующий снимок → `null`;
+  нет `pageerror`.
 - **TC-2.7 (P2)** Имя кластера. *Шаги:* изменить `#projName`, reload. *Ожид.:* сохранилось.
 
 ### TS-3. CRUD сотрудника
@@ -152,6 +158,9 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 - **TC-3.7 (P1)** Добавление через футер команды (`[data-addhere]`). *Ожид.:* новая аллокация
   предзаполнена этой командой.
 - **TC-3.8 (P1)** Добавление через `[data-addrole]`. *Ожид.:* модалка с предвыбранной ролью.
+- **TC-3.8b (P0)** Quick-add у роли **реально сохраняет** сотрудника (регрессия на баг
+  `quickAdd`/`isNew`). *Шаги:* «＋» у роли → заполнить имя → «Сохранить». *Ожид.:*
+  `people.length+1`, роль и команда совпадают, карточка появилась на доске.
 - **TC-3.9 (P1)** Сохранение без аллокаций. *Шаги:* удалить все строки `[data-arow]` → save.
   *Ожид.:* тост «Добавьте хотя бы одну аллокацию», модалка не закрылась.
 - **TC-3.10 (P2)** Пустое имя → «Без имени».
@@ -202,6 +211,9 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 
 ### TS-8. Аналитика
 - **TC-8.1 (P1)** Средний грейд кластера и % подрядчиков соответствуют фикстуре.
+- **TC-8.1b (P1)** Сводный грейд весится по **штатному grade-FTE**, не по полному FTE.
+  *Фикстура:* команда X {штат г10 fte1, подрядчик fte9}, команда Y {штат г6 fte1}.
+  *Ожид.:* кластерный средний грейд = `8.0` (а не ~9.6, как было бы при весе по полному FTE).
 - **TC-8.2 (P1)** Счётчик команд-выбросов = числу команд с не-зелёным флагом.
 - **TC-8.3 (P2)** Бар-чарт локаций: число `.barrow` = числу различных локаций; ширины > 0.
 - **TC-8.4 (P2)** Сворачивание `<details#analytics>` работает.

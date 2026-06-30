@@ -87,6 +87,42 @@ const FX_OUTLIER = () => ({
   }, snapshots: [], baselineId: null, uidCounter: 1000
 });
 
+// смешанные команды: крупный подрядный FTE не должен искажать сводный средний грейд
+// корректно: weight по grade-FTE → (10*1 + 6*1)/2 = 8.0; ошибочно (по полному FTE) → ~9.6
+const FX_MIXGRADE = () => ({
+  state: {
+    meta: { name: "Mix", version: 1 },
+    roles: ["Backend"], locations: ["Москва"],
+    teams: [
+      { id: "tX", name: "X", color: "#4f8cff" },
+      { id: "tY", name: "Y", color: "#6ee7b7" }
+    ],
+    people: [
+      { id: "s10", name: "S10", role: "Backend", grade: 10, isContractor: false, location: "Москва", allocations: [{ teamId: "tX", fte: 1 }] },
+      { id: "c9", name: "Contr", role: "Backend", grade: null, isContractor: true, location: "Москва", allocations: [{ teamId: "tX", fte: 9 }] },
+      { id: "s6", name: "S6", role: "Backend", grade: 6, isContractor: false, location: "Москва", allocations: [{ teamId: "tY", fte: 1 }] }
+    ]
+  }, snapshots: [], baselineId: null, uidCounter: 1000
+});
+
+// структурно некорректные документы для проверки normalizeDoc при импорте
+const FX_BADSCHEMA = {
+  state: {
+    // нет meta/roles/locations; people с разной «грязью»
+    teams: [
+      { id: "ok1", name: "Good", color: "#4f8cff" },
+      { id: "bad id!", name: "Renamed", color: "not-a-color" }   // небезопасный id + битый цвет
+    ],
+    people: [
+      { id: "pp1", name: "Valid", role: "Backend", grade: 99, isContractor: false, location: "М", allocations: [{ teamId: "ok1", fte: 1 }] }, // grade клампится до 12
+      { id: "pp2", name: "ContrWithGrade", grade: 11, isContractor: true, allocations: [{ teamId: "ok1", fte: "0.5" }] }, // grade→null, fte строкой
+      { id: "pp3", name: "GhostTeam", isContractor: false, grade: 8, allocations: [{ teamId: "does-not-exist", fte: 1 }] }, // аллокация на несуществующую команду → отбрасывается
+      { id: "pp4", name: "NoAlloc", grade: 9, isContractor: false, allocations: [{ teamId: "ok1", fte: 0 }] }, // fte=0 → нет аллокаций → человек отброшен
+      { id: "pp5", name: "BadAlloc", grade: 7, isContractor: false, allocations: "nope" } // allocations не массив → отброшен
+    ]
+  }, snapshots: "garbage", baselineId: "nope"
+};
+
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext();
@@ -198,6 +234,35 @@ const FX_OUTLIER = () => ({
     assert((await page.locator('#toastRoot .toast').innerText()).includes('Не удалось'), 'error toast');
     eq(await count('.team'), before, 'state intact');
   });
+  await T('TC-2.8', 'P1', 'Импорт структурно некорректного документа нормализуется', async () => {
+    await bootFixture(page, FX());
+    const fs = require('fs'), os = require('os'), p = require('path');
+    const fp = p.join(os.tmpdir(), 'badschema.json');
+    fs.writeFileSync(fp, JSON.stringify(FX_BADSCHEMA));
+    await page.locator('#fileInput').setInputFiles(fp);
+    await page.waitForTimeout(200);
+    const st = (await lsGet(page)).state;
+    // справочники-обязательны существуют
+    assert(Array.isArray(st.roles) && Array.isArray(st.locations) && Array.isArray(st.teams) && Array.isArray(st.people), 'arrays present');
+    eq(st.teams.length, 2, 'two teams kept');
+    // небезопасный id перегенерирован, цвет починен
+    const renamed = st.teams.find(t => t.name === 'Renamed');
+    assert(renamed && /^[A-Za-z0-9_-]+$/.test(renamed.id), 'unsafe id regenerated');
+    assert(/^#[0-9a-fA-F]{6}$/.test(renamed.color), 'bad color defaulted');
+    // люди: pp1 (grade клампится до 12), pp2 (contractor grade→null) остаются; pp3/pp4/pp5 отброшены
+    const names = st.people.map(x => x.name);
+    assert(names.includes('Valid'), 'valid person kept');
+    eq(st.people.find(x => x.name === 'Valid').grade, 12, 'grade clamped to 12');
+    const contr = st.people.find(x => x.name === 'ContrWithGrade');
+    assert(contr && contr.grade === null, 'contractor grade nulled');
+    eq(contr.allocations[0].fte, 0.5, 'string fte parsed');
+    assert(!names.includes('GhostTeam'), 'alloc to missing team dropped → person dropped');
+    assert(!names.includes('NoAlloc'), 'fte=0 → person dropped');
+    assert(!names.includes('BadAlloc'), 'allocations not-array → person dropped');
+    // baselineId на несуществующий снимок → null, без падений рендера
+    eq((await lsGet(page)).baselineId, null, 'baseline reset');
+    eq(curErrors.length, 0, 'no pageerror');
+  });
   await T('TC-2.7', 'P2', 'Имя кластера переживает reload', async () => {
     await bootFixture(page, FX());
     const pn = page.locator('#projName');
@@ -287,13 +352,30 @@ const FX_OUTLIER = () => ({
     // alloc row team preselected = tB
     eq(await page.locator('#m_allocs [data-ateam]').first().inputValue(), 'tB', 'preselect tB');
   });
-  await T('TC-3.8', 'P1', 'Добавление через [data-addrole]', async () => {
+  await T('TC-3.8', 'P1', 'Добавление через [data-addrole]: предвыбор роли', async () => {
     await bootFixture(page, FX());
     const team = page.locator('.team[data-team-id="tA"]');
     const grp = team.locator('.role-group', { has: page.locator('.role-h', { hasText: 'Backend' }) }).first();
     await grp.hover();
     await grp.locator('[data-addrole]').click({ force: true });
     eq(await page.locator('#m_role').inputValue(), 'Backend', 'role preselected Backend');
+  });
+  await T('TC-3.8b', 'P0', 'Quick-add у роли РЕАЛЬНО сохраняет сотрудника (рег. BUG quickAdd)', async () => {
+    await bootFixture(page, FX());
+    const before = (await lsGet(page)).state.people.length;
+    const team = page.locator('.team[data-team-id="tB"]');
+    const grp = team.locator('.role-group', { has: page.locator('.role-h', { hasText: 'Backend' }) }).first();
+    await grp.hover();
+    await grp.locator('[data-addrole]').click({ force: true });
+    await page.locator('#m_name').fill('QuickAdded');
+    await page.locator('#m_save').click(); await page.waitForTimeout(100);
+    const st = (await lsGet(page)).state;
+    eq(st.people.length, before + 1, 'person count +1');
+    const added = st.people.find(p => p.name === 'QuickAdded');
+    assert(added, 'person persisted');
+    eq(added.role, 'Backend', 'role Backend');
+    assert(added.allocations.some(a => a.teamId === 'tB'), 'allocated to tB');
+    eq(await page.locator('.team[data-team-id="tB"] .chip', { has: page.locator('.name', { hasText: 'QuickAdded' }) }).count(), 1, 'chip on board');
   });
   await T('TC-3.9', 'P1', 'Сохранение без аллокаций → тост, модалка открыта', async () => {
     await bootFixture(page, FX());
@@ -518,6 +600,12 @@ const FX_OUTLIER = () => ({
     assert(grade.startsWith('9.3'), 'cluster grade 9.3: ' + grade);
     const contr = await page.locator('#analyticsBody .stat').nth(1).locator('.v').innerText();
     assert(/%$/.test(contr), 'contr pct: ' + contr);
+  });
+  await T('TC-8.1b', 'P1', 'Сводный грейд весится по штатному grade-FTE, не по полному FTE', async () => {
+    await bootFixture(page, FX_MIXGRADE());
+    // корректно: (10*1 + 6*1)/2 = 8.0; на старом баге было бы ~9.6
+    const grade = await page.locator('#analyticsBody .stat').nth(0).locator('.v').innerText();
+    assert(grade.startsWith('8.0'), 'cluster grade must be 8.0 (got ' + grade + ')');
   });
   await T('TC-8.2', 'P1', 'Счётчик команд-выбросов', async () => {
     await bootFixture(page, FX_OUTLIER());
