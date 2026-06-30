@@ -55,7 +55,7 @@
     border-radius:8px;padding:4px 10px;min-width:200px}
   .search input{background:transparent;border:0;color:var(--text);font:inherit;outline:none;width:100%}
   select.f,input.f{background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    border-radius:8px;padding:6px 8px;font:inherit}
+    border-radius:8px;padding:6px 8px;font:inherit;min-width:0;max-width:100%}
   .chip-toggle{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;cursor:pointer;user-select:none}
 
   /* ---------- Analytics ---------- */
@@ -157,27 +157,29 @@
   .modal.wide{max-width:720px}
   @keyframes pop{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
   .modal h3{margin:0;padding:16px 18px;border-bottom:1px solid var(--line);font-size:16px;display:flex;align-items:center;gap:8px}
-  .modal .content{padding:16px 18px;display:flex;flex-direction:column;gap:14px;max-height:64vh;overflow:auto}
+  .modal .content{padding:16px 18px;display:flex;flex-direction:column;gap:14px;max-height:64vh;overflow-y:auto;overflow-x:hidden;min-width:0}
   .modal .foot{padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
-  .field{display:flex;flex-direction:column;gap:5px}
+  .field{display:flex;flex-direction:column;gap:5px;min-width:0}
   .field label{color:var(--muted);font-size:12px;font-weight:600}
   .field input,.field select,.field textarea{background:var(--panel2);border:1px solid var(--line);color:var(--text);
-    border-radius:8px;padding:8px 10px;font:inherit}
+    border-radius:8px;padding:8px 10px;font:inherit;width:100%;min-width:0;max-width:100%}
   .field textarea{resize:vertical;min-height:38px}
   .vac-check{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);
     border-radius:8px;padding:9px 11px;font-size:13px;color:var(--text);cursor:pointer}
   .vac-check input{width:16px;height:16px;flex:none}
-  .row{display:flex;gap:12px}.row>*{flex:1}
+  .row{display:flex;gap:12px}.row>*{flex:1;min-width:0}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
   .seg button{background:var(--panel2);border:0;padding:8px 14px;color:var(--muted)}
   .seg button.on{background:var(--accent);color:#fff}
   .alloc-row{display:flex;gap:8px;align-items:center}
-  .alloc-row select{flex:1}
-  .alloc-row input{width:80px}
-  .listmgr{display:flex;flex-direction:column;gap:6px}
+  .alloc-row select{flex:1;min-width:0}
+  .alloc-row input{width:80px;flex:none}
+  .listmgr{display:flex;flex-direction:column;gap:6px;min-width:0}
   .listmgr .item{display:flex;gap:8px;align-items:center;background:var(--panel2);border:1px solid var(--line);
-    border-radius:8px;padding:6px 8px}
-  .listmgr .item input{flex:1;background:transparent;border:0;color:var(--text);font:inherit;outline:none}
+    border-radius:8px;padding:6px 8px;min-width:0}
+  .listmgr .item input{flex:1;min-width:0;width:auto;background:transparent;border:0;color:var(--text);font:inherit;outline:none}
+  .listmgr .item input[type=color]{flex:none}
+  .listmgr .item .btn{flex:none}
   .hint{color:var(--muted);font-size:12px}
   .snap-item{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);
     border-radius:9px;padding:9px 11px}

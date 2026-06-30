@@ -895,6 +895,16 @@ const FX_VAC = () => ({
     eq((await lsGet(page)).state.teams.length, before + 1, 'team added from settings');
   });
 
+  await T('TC-11.8', 'P2', 'Справочники: нет горизонтального переполнения на узком окне', async () => {
+    await page.setViewportSize({ width: 560, height: 820 });
+    await bootDemo(page); // справочники: цвета ролей + локации + проекты + команды
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(80);
+    const ov = await page.locator('.modal .content').evaluate(el => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+    assert(ov.sw <= ov.cw + 1, `no horizontal overflow in settings (scrollWidth ${ov.sw} <= clientWidth ${ov.cw})`);
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 1280, height: 720 });
+  });
+
   // ============ TS-12 snapshots ============
   await T('TC-12.1', 'P0', 'Сохранить снимок', async () => {
     await bootFixture(page, FX());
