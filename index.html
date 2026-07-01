@@ -72,6 +72,8 @@
   .barrow .lbl{width:64px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .barrow .track{flex:1;height:7px;background:#0e1626;border-radius:4px;overflow:hidden}
   .barrow .fill{display:block;height:100%;min-width:2px;border-radius:4px}
+  .cov-row{font-size:12px;margin-top:5px;color:var(--text)}
+  .cov-role{display:inline-block;font-weight:700;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:0 6px;margin-right:3px}
 
   /* ---------- Board ---------- */
   main{padding:12px 16px 60px}
@@ -140,6 +142,7 @@
 
   .badge{font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px}
   .badge.contr{background:rgba(168,85,247,.18);color:#d6b4ff;border:1px solid rgba(168,85,247,.5)}
+  .badge.biz{background:rgba(46,191,113,.16);color:#8be0b0;border:1px solid rgba(46,191,113,.5)}
 
   .tfoot{padding:8px 10px;border-top:1px solid var(--line)}
   .empty-team{color:var(--muted);font-size:12px;text-align:center;padding:14px 6px;border:1px dashed var(--line);border-radius:8px;margin:6px}
@@ -242,6 +245,11 @@
       <option value="contractor">Только подрядчики</option>
       <option value="vacancy">Только ставки</option>
     </select>
+    <select class="f" id="filterKind">
+      <option value="">Все типы</option>
+      <option value="it">ИТ</option>
+      <option value="biz">Бизнес</option>
+    </select>
     <label class="chip-toggle"><input type="checkbox" id="filterMode"> скрывать несовпадающих</label>
     <span class="spacer"></span>
     <label class="chip-toggle" id="compareWrap" style="display:none">
@@ -283,7 +291,7 @@ const normTags = (arr)=> (Array.isArray(arr)?arr:[])
 let state = null;          // {meta, roles, locations, teams, people}
 let snapshots = [];        // [{id,name,createdAt,doc}]
 let baselineId = null;
-let ui = { search:"", fRole:"", fLoc:"", fStatus:"", fHide:false, compare:false, hideGrades:false };
+let ui = { search:"", fRole:"", fLoc:"", fStatus:"", fKind:"", fHide:false, compare:false, hideGrades:false };
 let history = [], hpos = -1;   // undo/redo стек документов
 let uidCounter = 1;
 
@@ -296,6 +304,7 @@ function roleColor(role){
   const i = state.roles.indexOf(role);
   return i>=0 ? ROLE_PALETTE[i%ROLE_PALETTE.length] : "var(--staff)";
 }
+const kindLabel = k => k==="biz" ? "Бизнес" : "ИТ";   // тип ставки
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 const clone = (o)=>JSON.parse(JSON.stringify(o));
@@ -312,13 +321,13 @@ function seed(){
   ];
   const projects = ["Платежи 2.0","Открытие счетов","ML-скоринг"];
   const P=(name,role,grade,contractor,loc,allocs,tags,comment,project,expiry)=>({
-    id:uid("p"),name,role,grade:contractor?null:grade,isContractor:contractor,isVacancy:false,location:loc,
+    id:uid("p"),name,role,grade:contractor?null:grade,isContractor:contractor,isVacancy:false,location:loc,kind:"it",
     tags:tags||[],comment:comment||"",project:project||"",expiry:expiry||"",
     allocations:allocs.map(a=>({teamId:teams[a[0]].id,fte:a[1]}))
   });
   // ставка (вакансия): без имени, штатная; опционально проект и срок действия
-  const V=(role,grade,allocs,project,expiry,tags)=>({
-    id:uid("p"),name:"",role,grade,isContractor:false,isVacancy:true,location:"",
+  const V=(role,grade,allocs,project,expiry,tags,kind)=>({
+    id:uid("p"),name:"",role,grade,isContractor:false,isVacancy:true,location:"",kind:kind||"it",
     tags:tags||[],comment:"",project:project||"",expiry:expiry||"",
     allocations:allocs.map(a=>({teamId:teams[a[0]].id,fte:a[1]}))
   });
@@ -342,9 +351,12 @@ function seed(){
     P("Анна Лис","Backend",8,false,"Тбилиси",[[3,1]]),
     P("Виктор Сом","QA",7,false,"Ереван",[[3,0.5]]),
   ];
+  // демо: часть позиций — «Бизнес» (SA/BA), остальные по умолчанию «ИТ»
+  for(const p of people){ if(p.name==="Мария Зуева"||p.name==="Ольга Тимина") p.kind="biz"; }
   const roleColors = { Backend:"#3b82f6", Frontend:"#10b981", SA:"#f59e0b", BA:"#a855f7",
     QA:"#ef4444", AT:"#06b6d4", "Data Engineer":"#84cc16" };
-  return { meta:{name:"Кластер продуктовой разработки",version:1}, roles, roleColors, locations, projects, teams, people };
+  return { meta:{name:"Кластер продуктовой разработки",version:1}, roles, roleColors,
+    roleCoverageExclude:["Data Engineer"], locations, projects, teams, people };
 }
 
 /* ============================================================ *
@@ -370,6 +382,7 @@ function normalizeDoc(input){
   const roles     = uniqStrings(src.roles);
   const locations = uniqStrings(src.locations);
   const projects  = uniqStrings(src.projects);   // справочник проектов для ставок
+  const roleCoverageExclude = uniqStrings(src.roleCoverageExclude); // роли, исключённые из «Пробелов покрытия»
   // цвета ролей: только валидные hex6
   const roleColors = {};
   if(src.roleColors && typeof src.roleColors==="object"){
@@ -415,11 +428,12 @@ function normalizeDoc(input){
     const expiry = validDateISO(rawExpiry) ? rawExpiry : "";
     const pr = asStr(p.project).trim();
     const project = pr && projects.includes(pr) ? pr : "";
+    const kind = p.kind==="biz" ? "biz" : "it";   // тип ставки: ИТ (дефолт) / Бизнес
     const allocations = (Array.isArray(p.allocations)?p.allocations:[])
       .map(a=>({ teamId: remap(asStr(a && a.teamId)), fte: Math.max(0, parseFloat(a && a.fte)||0) }))
       .filter(a=> a.fte>0 && validTeam.has(a.teamId));
     return { id, name: isVacancy ? "" : (asStr(p.name,"Без имени")||"Без имени"),
-             role: asStr(p.role).trim(), grade, isContractor, isVacancy,
+             role: asStr(p.role).trim(), grade, isContractor, isVacancy, kind,
              location: isVacancy ? "" : asStr(p.location).trim(),
              project, expiry, comment: asStr(p.comment),
              tags: normTags(p.tags), allocations };
@@ -428,7 +442,7 @@ function normalizeDoc(input){
   const meta = (src.meta && typeof src.meta==="object")
     ? { name: asStr(src.meta.name,"Кластер")||"Кластер", version:1 }
     : { name:"Кластер", version:1 };
-  return { meta, roles, roleColors, locations, projects, teams, people };
+  return { meta, roles, roleColors, roleCoverageExclude, locations, projects, teams, people };
 }
 
 function normalizeSnapshots(arr){
@@ -538,6 +552,7 @@ function matchFilter(p){
   if(ui.fStatus==="staff" && (p.isContractor || p.isVacancy)) return false; // «штат» — только реальные штатные
   if(ui.fStatus==="contractor" && !p.isContractor) return false;
   if(ui.fStatus==="vacancy" && !p.isVacancy) return false;
+  if(ui.fKind && (p.kind==="biz"?"biz":"it")!==ui.fKind) return false;
   if(ui.search){
     const q=ui.search.toLowerCase();
     // поиск по имени, роли, проекту, тегам и слову «вакансия» (комментарий намеренно не ищем — он скрыт с доски)
@@ -546,7 +561,7 @@ function matchFilter(p){
   }
   return true;
 }
-function anyFilterActive(){ return ui.search||ui.fRole||ui.fLoc||ui.fStatus; }
+function anyFilterActive(){ return ui.search||ui.fRole||ui.fLoc||ui.fStatus||ui.fKind; }
 
 // карта перемещений относительно baseline: personId -> Set(teamId) в базе
 function baselineAlloc(){
@@ -562,6 +577,7 @@ function render(){
   fillSelect($("#filterRole"), state.roles, ui.fRole, "Все роли");
   fillSelect($("#filterLoc"), state.locations, ui.fLoc, "Все локации");
   $("#filterStatus").value = ui.fStatus;
+  $("#filterKind").value = ui.fKind;
   $("#searchInput").value = ui.search;
   $("#filterMode").checked = ui.fHide;
   $("#projName").value = state.meta.name||"";
@@ -618,7 +634,29 @@ function renderAnalytics(stats){
   const tagTop = Object.entries(tagAgg).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const tagMax = tagTop.length ? tagTop[0][1] : 1;
 
+  // распределение по ролям: число занятых (штат+подряд) + отдельно открытые ставки на роль
+  const roleFilled={}, roleVac={};
+  for(const p of state.people){ const r=p.role||"(без роли)";
+    if(p.isVacancy) roleVac[r]=(roleVac[r]||0)+1; else roleFilled[r]=(roleFilled[r]||0)+1; }
+  const roleTop = [...new Set([...Object.keys(roleFilled),...Object.keys(roleVac)])]
+    .map(r=>[r, roleFilled[r]||0, roleVac[r]||0]).sort((a,b)=> (b[1]+b[2])-(a[1]+a[2]));
+  const roleMax = roleTop.length ? Math.max(1, ...roleTop.map(x=>x[1])) : 1;
+
+  // пробелы покрытия ролей: для каждой не-исключённой роли — команды, где нет ни одного занятого сотрудника этой роли
+  const covExclude = new Set(state.roleCoverageExclude||[]);
+  const coverageGaps = [];
+  for(const role of state.roles){
+    if(covExclude.has(role)) continue;
+    const missing = state.teams.filter(t =>
+      !state.people.some(p => !p.isVacancy && p.role===role && p.allocations.some(a=>a.teamId===t.id)));
+    if(missing.length) coverageGaps.push([role, missing.map(t=>t.name)]);
+  }
+
   const unbalanced = stats.per.filter(x=>zFlag(x.m.avgGrade,stats.grade).level!=="good"||zFlag(x.m.contrShare,stats.share).level!=="good").length;
+
+  // тип ставки: ИТ / Бизнес (все позиции, включая вакансии)
+  const kindBiz = state.people.filter(p=>p.kind==="biz").length;
+  const kindIt  = state.people.length - kindBiz;
 
   $("#anHint").textContent = `${state.teams.length} команд · ${stats.totalHead} человек · ${stats.vacancies} ставок`;
   $("#analyticsBody").innerHTML = `
@@ -640,10 +678,23 @@ function renderAnalytics(stats){
     <div class="stat"><div class="k">Команд / людей</div>
       <div class="v">${state.teams.length}<span class="hint" style="font-size:13px"> / ${stats.totalHead}</span></div>
       <div class="sub">штат+подрядчики, без ставок</div></div>
+    <div class="stat"><div class="k">Тип: ИТ / Бизнес</div>
+      <div class="v">${kindIt}<span class="hint" style="font-size:13px"> / ${kindBiz}</span></div>
+      <div class="sub">позиций по типу (вкл. ставки)</div></div>
     <div class="stat" style="grid-column:span 2"><div class="k">Распределение по локациям (FTE)</div>
       ${locTop.length? locTop.map((l,i)=>`<div class="barrow"><span class="lbl" title="${esc(l[0])}">${esc(l[0])}</span>
         <span class="track"><span class="fill" style="width:${(l[1]/totFte*100).toFixed(0)}%;background:${palette[i%palette.length]}"></span></span>
         <span class="hint">${l[1].toFixed(1)}</span></div>`).join("") : '<div class="sub">нет данных</div>'}
+    </div>
+    <div class="stat" style="grid-column:span 2"><div class="k">Распределение по ролям (человек)</div>
+      ${roleTop.length? roleTop.map(r=>`<div class="barrow"><span class="lbl" title="${esc(r[0])}">${esc(r[0])}</span>
+        <span class="track"><span class="fill" style="width:${(r[1]/roleMax*100).toFixed(0)}%;background:${roleColor(r[0])}"></span></span>
+        <span class="hint">${r[1]}${r[2]?` <span style="color:#cdb37a" title="открытые ставки">+${r[2]} ст.</span>`:""}</span></div>`).join("") : '<div class="sub">нет данных</div>'}
+    </div>
+    <div class="stat" style="grid-column:span 2"><div class="k">Пробелы покрытия ролей</div>
+      ${coverageGaps.length ? coverageGaps.map(g=>`<div class="cov-row"><span class="cov-role" style="border-color:${roleColor(g[0])}">${esc(g[0])}</span> нет в: ${g[1].map(esc).join(", ")}</div>`).join("")
+        : '<div class="sub">во всех командах закрыты все нужные роли ✓</div>'}
+      <div class="hint" style="margin-top:6px">роли можно исключать из этого блока в «Справочниках»</div>
     </div>
     <div class="stat" style="grid-column:span 2"><div class="k">Топ тегов (навыки)</div>
       ${tagTop.length? tagTop.map((t,i)=>`<div class="barrow"><span class="lbl" title="${esc(t[0])}">${esc(t[0])}</span>
@@ -684,7 +735,7 @@ function renderTeam(team, stats, baseMap, baseStats){
           <div class="mv">${m.avgGrade!=null?m.avgGrade.toFixed(1):"—"}
             <span class="flagdot" style="background:${flagColor(gf.level)}" title="отклонение от кластера"></span></div>
           <div class="accentbar" style="background:${flagColor(gf.level)}"></div></div>
-        <div class="metric"><div class="ml">Подрядчики</div>
+        <div class="metric"><div class="ml">Подряд</div>
           <div class="mv">${Math.round(m.contrShare*100)}%
             <span class="flagdot" style="background:${flagColor(sf.level)}"></span></div>
           <div class="accentbar" style="background:${flagColor(sf.level)}"></div></div>
@@ -759,12 +810,14 @@ function renderChip(p, alloc, teamId, baseMap){
     p.expiry  ? `<span class="pos-chip temp" title="Срок действия ставки: ${esc(p.expiry)}">⏳ до ${esc(p.expiry)}</span>` : ""
   ].join("");
   const posRow = posChips ? `<div class="pos-chips">${posChips}</div>` : "";
+  // тип ставки: помечаем только «Бизнес» (ИТ — дефолт, не засоряем доску)
+  const bizBadge = p.kind==="biz" ? `<span class="badge biz" title="Бизнес-ставка">Бизнес</span>` : "";
   let nameHtml, metaHtml;
   if(p.isVacancy){
-    nameHtml = `<span class="vac-name">Вакансия</span>`;
+    nameHtml = `<span class="vac-name">Вакансия</span> ${bizBadge}`;
     metaHtml = esc(p.role||"—");
   } else {
-    nameHtml = `${esc(p.name)} ${contrBadge}`;
+    nameHtml = `${esc(p.name)} ${contrBadge}${bizBadge}`;
     metaHtml = `${esc(p.role||"—")} · ${esc(p.location||"—")}`;
   }
 
@@ -872,7 +925,7 @@ function personModal(person, defaultTeamId, defaultRole){
   const isNew=!person;
   const p = person ? clone(person) : {
     id:uid("p"), name:"", role:defaultRole||state.roles[0]||"", grade:9, isContractor:false, isVacancy:false,
-    location:state.locations[0]||"", tags:[], comment:"", project:"", expiry:"",
+    kind:"it", location:state.locations[0]||"", tags:[], comment:"", project:"", expiry:"",
     allocations: defaultTeamId?[{teamId:defaultTeamId,fte:1}]:[]
   };
   const roleOpts=state.roles.map(r=>`<option ${r===p.role?"selected":""}>${esc(r)}</option>`).join("");
@@ -907,6 +960,10 @@ function personModal(person, defaultTeamId, defaultRole){
       <div class="row">
         <div class="field"><label>Роль</label><select id="m_role">${roleOpts}</select></div>
         <div class="field" id="m_loc_field"><label>Локация</label><select id="m_loc">${locOpts}</select></div>
+        <div class="field"><label>Тип ставки</label><select id="m_kind">
+          <option value="it" ${p.kind!=="biz"?"selected":""}>ИТ</option>
+          <option value="biz" ${p.kind==="biz"?"selected":""}>Бизнес</option>
+        </select></div>
       </div>
       <div class="row" id="m_pos_field">
         <div class="field"><label>Проект ставки (опционально)</label><select id="m_project">${projOpts}</select></div>
@@ -975,6 +1032,7 @@ function personModal(person, defaultTeamId, defaultRole){
   $("#m_save").onclick=()=>{
     p.isVacancy=$("#m_vacancy").checked;
     p.role=$("#m_role").value;
+    p.kind=$("#m_kind").value==="biz"?"biz":"it";
     p.tags=normTags($("#m_tags").value.split(","));
     p.comment=$("#m_comment").value;
     // проект/срок — атрибуты ставки, сохраняются и у вакансии, и у занятой позиции
@@ -1016,6 +1074,7 @@ function settingsModal(){
             <div class="item">
               <input type="color" value="${roleColor(r)}" data-rolecolor="${i}" style="width:30px;height:28px;padding:2px;flex:none" title="Цвет квадрата грейда для роли">
               <input value="${esc(r)}" data-roleedit="${i}">
+              <input type="checkbox" data-rolecov="${i}" ${(state.roleCoverageExclude||[]).includes(r)?'':'checked'} style="width:16px;height:16px;flex:none" title="Учитывать роль в «Пробелах покрытия ролей» (снимите для необязательных ролей)">
               <button class="btn sm ghost" data-roleup="${i}">↑</button>
               <button class="btn sm ghost" data-roledown="${i}">↓</button>
               <button class="btn sm ghost" data-rolerm="${i}" style="color:var(--bad)">✕</button>
@@ -1072,18 +1131,26 @@ function settingsModal(){
     const r=state.roles[+inp.dataset.rolecolor]; state.roleColors=state.roleColors||{};
     state.roleColors[r]=inp.value; commit();
   });
+  // роль: учитывать ли в «Пробелах покрытия» (галка снята → роль в roleCoverageExclude)
+  $$("[data-rolecov]").forEach(cb=>cb.onchange=()=>{
+    const r=state.roles[+cb.dataset.rolecov]; state.roleCoverageExclude=state.roleCoverageExclude||[];
+    if(cb.checked) state.roleCoverageExclude=state.roleCoverageExclude.filter(x=>x!==r);
+    else if(!state.roleCoverageExclude.includes(r)) state.roleCoverageExclude.push(r);
+    commit();
+  });
   $$("[data-roleedit]").forEach(inp=>inp.onchange=()=>{
     const i=+inp.dataset.roleedit, old=state.roles[i], nv=inp.value.trim();
     if(!nv || nv===old){ inp.value=old; return; }
     if(state.roles.some((r,j)=>j!==i && r===nv)){ toast(`Роль «${nv}» уже существует`); inp.value=old; return; }
-    // настоящее переименование: переносим цвет И мигрируем сотрудников
+    // настоящее переименование: переносим цвет, признак покрытия И мигрируем сотрудников
     if(state.roleColors && state.roleColors[old]!=null){ state.roleColors[nv]=state.roleColors[old]; delete state.roleColors[old]; }
+    if(state.roleCoverageExclude) state.roleCoverageExclude=state.roleCoverageExclude.map(x=>x===old?nv:x);
     for(const p of state.people){ if(p.role===old) p.role=nv; }
     state.roles[i]=nv;
     commit(); rebind(); });
   $$("[data-roleup]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roleup; if(a>0){ [state.roles[a-1],state.roles[a]]=[state.roles[a],state.roles[a-1]]; commit(); rebind(); } });
   $$("[data-roledown]").forEach(b=>b.onclick=()=>{ const a=+b.dataset.roledown; if(a<state.roles.length-1){ [state.roles[a+1],state.roles[a]]=[state.roles[a],state.roles[a+1]]; commit(); rebind(); } });
-  $$("[data-rolerm]").forEach(b=>b.onclick=()=>{ const i=+b.dataset.rolerm, r=state.roles[i]; state.roles.splice(i,1); if(state.roleColors) delete state.roleColors[r]; commit(); rebind(); });
+  $$("[data-rolerm]").forEach(b=>b.onclick=()=>{ const i=+b.dataset.rolerm, r=state.roles[i]; state.roles.splice(i,1); if(state.roleColors) delete state.roleColors[r]; if(state.roleCoverageExclude) state.roleCoverageExclude=state.roleCoverageExclude.filter(x=>x!==r); commit(); rebind(); });
   $$("[data-rm]").forEach(b=>b.onclick=()=>{ const [key,i]=b.dataset.rm.split(":"); const removed=state[key][+i]; state[key].splice(+i,1);
     // строгая модель проектов (V6-F2): удаление проекта снимает его со ставок, чтобы не было «несправочных» ссылок
     if(key==="projects"){ for(const p of state.people){ if(p.project===removed) p.project=""; } }
@@ -1237,6 +1304,7 @@ $("#searchInput").oninput=e=>{ ui.search=e.target.value; render(); };
 $("#filterRole").onchange=e=>{ ui.fRole=e.target.value; render(); };
 $("#filterLoc").onchange=e=>{ ui.fLoc=e.target.value; render(); };
 $("#filterStatus").onchange=e=>{ ui.fStatus=e.target.value; render(); };
+$("#filterKind").onchange=e=>{ ui.fKind=e.target.value; render(); };
 $("#filterMode").onchange=e=>{ ui.fHide=e.target.checked; render(); };
 $("#compareToggle").onchange=e=>{ ui.compare=e.target.checked; render(); };
 

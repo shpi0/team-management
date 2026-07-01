@@ -768,6 +768,30 @@ const FX_POS = () => ({
     const open2 = await page.locator('#analytics').evaluate(el => el.open);
     assert(open1 !== open2, 'toggled open state');
   });
+  await T('TC-8.5', 'P1', 'Аналитика: распределение по ролям', async () => {
+    await bootFixture(page, FX()); // Backend x2 (p1 + p3 contractor), QA x1
+    const card = page.locator('#analyticsBody .stat', { hasText: 'Распределение по ролям' });
+    eq(await card.count(), 1, 'role distribution card present');
+    assert(await card.locator('.barrow').count() >= 2, 'Backend + QA rows');
+    const beRow = card.locator('.barrow', { has: page.locator('.lbl', { hasText: 'Backend' }) });
+    eq((await beRow.locator('.hint').innerText()).trim(), '2', 'Backend headcount 2');
+  });
+  await T('TC-8.6', 'P1', 'Аналитика: пробелы покрытия ролей', async () => {
+    await bootFixture(page, FX()); // tB has Backend (p3) но нет QA
+    const card = page.locator('#analyticsBody .stat', { hasText: 'Пробелы покрытия ролей' });
+    eq(await card.count(), 1, 'coverage card present');
+    const txt = await card.innerText();
+    assert(txt.includes('QA'), 'QA gap listed');
+    assert(txt.includes('B'), 'team B listed as missing QA');
+    assert(!/Backend\s+нет в/.test(txt), 'Backend covered everywhere (not a gap)');
+  });
+  await T('TC-8.7', 'P1', 'Аналитика: разбивка по типу ИТ/Бизнес', async () => {
+    await bootDemo(page); // 2 позиции biz (Мария Зуева SA, Ольга Тимина BA)
+    const card = page.locator('#analyticsBody .stat', { hasText: 'Тип: ИТ / Бизнес' });
+    eq(await card.count(), 1, 'kind analytics card present');
+    // biz = 2 → в значении "N / 2"
+    assert(/\/\s*2\b/.test(await card.locator('.v').innerText()), 'biz count = 2: ' + (await card.locator('.v').innerText()));
+  });
 
   // ============ TS-9 undo/redo ============
   await T('TC-9.1', 'P0', 'Undo переноса', async () => {
@@ -916,6 +940,18 @@ const FX_POS = () => ({
     assert(ov.sw <= ov.cw + 1, `no horizontal overflow in settings (scrollWidth ${ov.sw} <= clientWidth ${ov.cw})`);
     await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 1280, height: 720 });
+  });
+  await T('TC-11.9', 'P1', 'Исключение роли из «Пробелов покрытия» ([data-rolecov])', async () => {
+    await bootFixture(page, FX()); // QA не покрыт в tB → изначально в пробелах
+    let card = page.locator('#analyticsBody .stat', { hasText: 'Пробелы покрытия ролей' });
+    assert((await card.innerText()).includes('QA'), 'QA gap initially present');
+    await page.locator('#settingsBtn').click(); await page.waitForTimeout(60);
+    // QA — вторая роль (индекс 1); снимаем галку покрытия
+    await page.locator('#s_roles [data-rolecov]').nth(1).uncheck(); await page.waitForTimeout(80);
+    assert(((await lsGet(page)).state.roleCoverageExclude || []).includes('QA'), 'QA persisted as excluded');
+    await page.keyboard.press('Escape');
+    card = page.locator('#analyticsBody .stat', { hasText: 'Пробелы покрытия ролей' });
+    assert(!(await card.innerText()).includes('QA'), 'QA no longer a gap after exclude');
   });
 
   // ============ TS-12 snapshots ============
@@ -1479,6 +1515,35 @@ const FX_POS = () => ({
     assert(m.projW < m.boxW * 0.6, `project chip is content-sized (projW ${Math.round(m.projW)} < 60% of ${Math.round(m.boxW)})`);
     // оба чипа суммарно влезают в строку (nowrap, без переполнения контейнера)
     assert(m.projW + m.tempW <= m.boxW + 2, 'both chips fit on one line');
+  });
+
+  // ============ TS-18 тип ставки ИТ/Бизнес + метка «Подряд» ============
+  await T('TC-18.1', 'P1', 'Тип ставки: установка «Бизнес» → бейдж + сохранение', async () => {
+    await bootFixture(page, FX()); // все по умолчанию «ИТ»
+    const chip = page.locator('.chip', { has: page.locator('.name', { hasText: 'S10' }) }).first();
+    eq(await chip.locator('.badge.biz').count(), 0, 'no biz badge by default (ИТ)');
+    await chip.locator('[data-edit]').click({ force: true }); await page.waitForTimeout(60);
+    await page.locator('#m_kind').selectOption('biz');
+    await page.locator('#m_save').click(); await page.waitForTimeout(80);
+    eq((await lsGet(page)).state.people.find(x => x.name === 'S10').kind, 'biz', 'kind saved biz');
+    const chip2 = page.locator('.chip', { has: page.locator('.name', { hasText: 'S10' }) }).first();
+    eq(await chip2.locator('.badge.biz').count(), 1, 'biz badge shown');
+  });
+  await T('TC-18.2', 'P1', 'Фильтр по типу (Бизнес)', async () => {
+    await bootDemo(page); // Мария Зуева и Ольга Тимина — biz
+    await page.locator('#filterKind').selectOption('biz'); await page.waitForTimeout(80);
+    assert(await count('.chip.hit') >= 1, 'biz chips highlighted');
+    assert(await count('.chip.dim') >= 1, 'non-biz dimmed');
+    const maria = page.locator('.chip.hit', { has: page.locator('.name', { hasText: 'Мария Зуева' }) });
+    assert(await maria.count() >= 1, 'biz person highlighted');
+    const it = page.locator('.chip', { has: page.locator('.name', { hasText: 'Алексей Орлов' }) }).first();
+    assert(await it.evaluate(el => el.classList.contains('dim')), 'IT person dimmed');
+  });
+  await T('TC-18.3', 'P2', 'Метка метрики команды — «Подряд» (не «Подрядчики»)', async () => {
+    await bootFixture(page, FX());
+    const labels = await page.locator('.team[data-team-id="tA"] .metric .ml').allInnerTexts();
+    assert(labels.some(l => l.trim() === 'Подряд'), 'metric label «Подряд»: ' + labels.join('|'));
+    assert(!labels.some(l => l.includes('Подрядчики')), 'no «Подрядчики» label');
   });
 
   await browser.close();

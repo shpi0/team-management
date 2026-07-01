@@ -95,13 +95,13 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 | Область | Селекторы |
 |---------|-----------|
 | Шапка | `#projName #addPerson #addTeam #undo #redo #snapBtn #settingsBtn #saveBtn #loadBtn #pngBtn #printBtn #fileInput` |
-| Фильтры | `#searchInput #filterRole #filterLoc #filterStatus #filterMode #compareWrap #compareToggle #baselineName` |
-| Аналитика | `#analytics #analyticsBody #anHint`, карточки `.stat`, бары `.barrow` |
+| Фильтры | `#searchInput #filterRole #filterLoc #filterStatus #filterKind #filterMode #compareWrap #compareToggle #baselineName` |
+| Аналитика | `#analytics #analyticsBody #anHint`, карточки `.stat` (искать по тексту `.k`), бары `.barrow`, покрытие `.cov-row>.cov-role` |
 | Команда | `.team[data-team-id]`, `[data-rename]`, `[data-delteam]`, `.metric .mv`, `.flagdot`, `.vac-strip`, `[data-addhere]`, `.diff-strip`, `.delta.up/.down` |
 | Роли в команде | `.role-group`, `.role-h .count`, `[data-addrole]` |
-| Карточка | `.chip[data-person-id][data-team-id]`, `.chip.contractor`, `.chip.vacancy`, `.grade`, `.name`, `.vac-name`, `.meta`, `.pos-chip.proj`, `.pos-chip.temp`, `.fte`, `[data-edit]`, классы `.dim .hit .moved-in` |
-| Модалка сотрудника | `#m_vacancy`, `#m_name_field`, `#m_status_field`, `#m_status button[data-st]`, `#m_grade`, `#m_role`, `#m_loc_field`, `#m_loc`, `#m_pos_field`, `#m_project`, `#m_expiry`, `#m_tags`, `#m_comment`, `#m_allocs [data-arow]`, `[data-ateam] [data-afte] [data-adel]`, `#m_addalloc`, `#m_allocsum`, `#m_save`, `#m_delete` |
-| Справочники | `#s_roles` (роли: `[data-rolecolor] [data-roleedit] [data-roleup] [data-roledown] [data-rolerm]`), `#s_locations`/`#s_projects` (`[data-edit] [data-up] [data-down] [data-rm]`), `[data-add]`, `#s_newrole`, `#s_newloc`, `#s_newproj`, `#s_teams`, `[data-tname] [data-tcolor] [data-trm]`, `#s_addteam` |
+| Карточка | `.chip[data-person-id][data-team-id]`, `.chip.contractor`, `.chip.vacancy`, `.grade`, `.name`, `.vac-name`, `.badge.biz`, `.meta`, `.pos-chip.proj`, `.pos-chip.temp`, `.fte`, `[data-edit]`, классы `.dim .hit .moved-in` |
+| Модалка сотрудника | `#m_vacancy`, `#m_name_field`, `#m_status_field`, `#m_status button[data-st]`, `#m_grade`, `#m_role`, `#m_loc_field`, `#m_loc`, `#m_kind`, `#m_pos_field`, `#m_project`, `#m_expiry`, `#m_tags`, `#m_comment`, `#m_allocs [data-arow]`, `[data-ateam] [data-afte] [data-adel]`, `#m_addalloc`, `#m_allocsum`, `#m_save`, `#m_delete` |
+| Справочники | `#s_roles` (роли: `[data-rolecolor] [data-roleedit] [data-rolecov] [data-roleup] [data-roledown] [data-rolerm]`), `#s_locations`/`#s_projects` (`[data-edit] [data-up] [data-down] [data-rm]`), `[data-add]`, `#s_newrole`, `#s_newloc`, `#s_newproj`, `#s_teams`, `[data-tname] [data-tcolor] [data-trm]`, `#s_addteam` |
 | Снимки | `#snap_name`, `#snap_save`, `.snap-item`, `.snap-item.baseline`, `[data-base] [data-restore] [data-export] [data-delsnap]` |
 | Общее | `.overlay`, `.modal`, `#toastRoot .toast` |
 
@@ -225,6 +225,11 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
   *(Был баг: `.fill` — inline `<span>`, игнорировал height/width → полоса нулевая. Старый тест
   проверял лишь число баров/строку width, поэтому пропустил — теперь проверяем геометрию и цвет.)*
 - **TC-8.4 (P2)** Сворачивание `<details#analytics>` работает.
+- **TC-8.5 (P1)** Карточка «Распределение по ролям»: есть бар-строки по ролям; счётчик занятых
+  верный (напр. Backend = 2).
+- **TC-8.6 (P1)** Карточка «Пробелы покрытия ролей»: команда без роли (напр. без QA) перечислена;
+  роль, закрытая во всех командах, не показана как пробел.
+- **TC-8.7 (P1)** Карточка «Тип: ИТ / Бизнес»: значение отражает число biz-позиций.
 
 ### TS-9. Undo / Redo
 - **TC-9.1 (P0)** Undo переноса. *Шаги:* перенос → `Ctrl+Z` (или `#undo`). *Ожид.:* карточка
@@ -256,6 +261,8 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
 - **TC-11.7 (P2)** `#s_addteam` добавляет команду из справочника.
 - **TC-11.8 (P2)** «Справочники» на узком окне (≈560px): у `.modal .content` нет горизонтального
   переполнения (`scrollWidth ≤ clientWidth`). Регрессия на горизонтальную полосу прокрутки.
+- **TC-11.9 (P1)** Исключение роли из покрытия: снятие галки `[data-rolecov]` добавляет роль в
+  `state.roleCoverageExclude`; роль перестаёт показываться в «Пробелах покрытия ролей».
 
 ### TS-12. Снимки и сравнение as-is/to-be
 - **TC-12.1 (P0)** Сохранить снимок (`#snap_save`). *Ожид.:* `.snap-item` появился с именем и датой.
@@ -355,6 +362,12 @@ async function html5Drag(page, chipSelector, targetTeamSelector) {
   → `""` (чипы не показаны); валидные значения сохраняются (V8-F1, strict policy и для не-вакансий).
 - **TC-17.15 (P2)** Лейаут чипсов: `.pos-chip.proj` и `.pos-chip.temp` на одной строке (равный
   `offsetTop`); чип проекта сжат по контенту (не растянут на всю ширину строки чипсов).
+
+### TS-18. Тип ставки ИТ/Бизнес + метка «Подряд»
+- **TC-18.1 (P1)** Установка типа «Бизнес» (`#m_kind`) → бейдж `.badge.biz` на карточке,
+  `person.kind==="biz"` сохраняется; по умолчанию бейджа нет (ИТ).
+- **TC-18.2 (P1)** Фильтр `#filterKind`=Бизнес: подсвечивает только biz-позиции, ИТ приглушены.
+- **TC-18.3 (P2)** Метка метрики команды — «Подряд» (не «Подрядчики»).
 
 ---
 
