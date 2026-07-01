@@ -245,7 +245,7 @@ const FX_POS = () => ({
   });
   await T('TC-1.4', 'P1', 'Аналитика присутствует', async () => {
     await bootDemo(page);
-    eq(await count('#analyticsBody .stat'), 8, '8 stat cards (грейд, подрядчики, FTE, баланс, ставки, команд/людей, локации, теги)');
+    eq(await count('#analyticsBody .stat'), 11, '11 stat cards (грейд, подряд, FTE, баланс, ставки, тип ИТ/Бизнес, команд/людей, локации, роли-распределение, роли-пробелы, теги)');
     const hint = await page.locator('#anHint').innerText();
     assert(/команд/.test(hint) && /человек/.test(hint), 'anHint text: ' + hint);
   });
@@ -750,10 +750,12 @@ const FX_POS = () => ({
   });
   await T('TC-8.3', 'P1', 'Бар-чарт локаций: полосы реально залиты (геометрия + цвет)', async () => {
     await bootFixture(page, FX()); // 2 locations
-    const rows = await count('#analyticsBody .barrow');
+    // .barrow используется и в «Распределении по ролям» → ограничиваем счёт карточкой локаций
+    const locCard = page.locator('#analyticsBody .stat', { hasText: 'Распределение по локациям' });
+    const rows = await locCard.locator('.barrow').count();
     eq(rows, 2, '2 location bars');
     // регрессия бага: .fill был inline <span> → height/width игнорировались, заливки нет.
-    const fill = page.locator('#analyticsBody .barrow .fill').first();
+    const fill = locCard.locator('.barrow .fill').first();
     const box = await fill.evaluate(el => { const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el); return { w: r.width, h: r.height, bg: cs.backgroundColor, disp: cs.display }; });
     assert(box.h >= 4, 'fill has real height (got ' + box.h + ')');
@@ -1542,8 +1544,9 @@ const FX_POS = () => ({
   await T('TC-18.3', 'P2', 'Метка метрики команды — «Подряд» (не «Подрядчики»)', async () => {
     await bootFixture(page, FX());
     const labels = await page.locator('.team[data-team-id="tA"] .metric .ml').allInnerTexts();
-    assert(labels.some(l => l.trim() === 'Подряд'), 'metric label «Подряд»: ' + labels.join('|'));
-    assert(!labels.some(l => l.includes('Подрядчики')), 'no «Подрядчики» label');
+    // .metric .ml имеет text-transform:uppercase → innerText в CAPS; сравниваем без регистра
+    assert(labels.some(l => l.trim().toLowerCase() === 'подряд'), 'metric label «Подряд»: ' + labels.join('|'));
+    assert(!labels.some(l => l.toLowerCase().includes('подрядчики')), 'no «Подрядчики» label');
   });
 
   await browser.close();
